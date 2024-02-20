@@ -29,6 +29,9 @@ class DevicePorts:
 
     GATE = Ports.PORT6
 
+    ULTRASONIC = brain.three_wire_port.a
+    VISION = Ports.PORT1
+
     FL_LINE = brain.three_wire_port.g
     FR_LINE = brain.three_wire_port.b
 
@@ -77,6 +80,12 @@ class Constants:
         RIGTH_LINE_Y_METERS = 0 # FIXME
 
         LIFT_SPEED = 150
+
+        BRIGHTNESS = 41
+
+        LIME = Signature(3, -5513, -3161, -4337, -3823, -2027, -2925, 2.5, 0)
+        LEMON = Signature(1, 3231, 3841, 3536, -3355, -2697, -3026, 4.2, 0)
+        TANGERINE = Signature(2, 7447, 8539, 7993, -1977, -1525, -1751, 9, 0)
 
 
 
@@ -165,6 +174,22 @@ class LineSensorArray:
 
 
 
+
+class Vision:
+    vision = Vision(DevicePorts.VISION, Constants.BRIGHTNESS, Constants.LEMON, Constants.LEMON, Constants.TANGERINE)
+    currentSnapshot = None
+    previousSnapshot = None
+    currentFruit = None
+
+    def periodic(self):
+        self.previousSnapshot = self.currentSnapshot
+        self.currentSnapshot = self.vision.take_snapshot(self.currentFruit)
+
+    def changeFruit(self, fruit: Signature):
+        self.currentFruit = fruit
+
+    def getXOffset(self):
+        return self.vision.largest_object().centerX
 
 
 
@@ -372,6 +397,12 @@ class Lift:
     leftLift = Motor(DevicePorts.LEFT_LIFT, False)
     rightLift = Motor(DevicePorts.RIGHT_LIFT, True)
 
+    ultrasonic = Sonar(DevicePorts.ULTRASONIC)
+
+    LOW_DISTANCE = 0.0
+    MID_DISTANCE = 0.0
+    HIGH_DISTANCE = 0.0
+
     PINION_CIRCUMFERENCE_IN = 0.5
 
     STOW_POSITION = 0.025
@@ -404,6 +435,14 @@ class Lift:
         self.leftLift.spin_to_position(self.HIGH_POSITION, TURNS, False)
         self.rightLift.spin_to_position(self.HIGH_POSITION, TURNS, True)
 
+    def setUltrasonicPosition(self):
+        if (math.isclose(self.ultrasonic.distance(INCHES), self.LOW_POSITION)):
+            self.setLowPosition()
+        elif (math.isclose(self.ultrasonic.distance(INCHES), self.MID_POSITION)):
+            self.setMidPosition()
+        elif (math.isclose(self.ultrasonic.distance(INCHES), self.HIGH_POSITION)):
+            self.setHighPosition()
+
     def stop(self):
         self.leftLift.stop()
 
@@ -431,7 +470,7 @@ class Gate:
         self.leftGate.spin_to_position(self.UNLOCKED_POSITION, DEGREES)
 
 
-
+state = 0
 
 
 timer = Timer()
@@ -439,8 +478,12 @@ timer = Timer()
 drive = Drive()
 lift = Lift()
 gate = Gate()
+vision = Vision()
 
 frontLine = LineSensorArray(DevicePorts.FL_LINE, DevicePorts.FR_LINE)
+
+
+
 
 
 def robotPeriodic():
