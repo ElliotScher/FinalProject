@@ -15,6 +15,8 @@ brain = Brain()
 
 controller = Controller()
 
+timer = Timer()
+
 class DevicePorts:
     
     FL_DRIVE = Ports.PORT20
@@ -84,7 +86,7 @@ class Constants:
         BRIGHTNESS = 41
 
         LIME = Signature(3, -5513, -3161, -4337, -3823, -2027, -2925, 2.5, 0)
-        LEMON = Signature(1, 3231, 3841, 3536, -3355, -2697, -3026, 4.2, 0)
+        LEMON = Signature(1, 3231, 3841, 3536, -3355, -2697, -3026, 5.5, 0)
         TANGERINE = Signature(2, 7447, 8539, 7993, -1977, -1525, -1751, 9, 0)
 
 
@@ -131,7 +133,6 @@ class Odometry:
         
 class LineSensorArray:
     __prevError = 0.0
-    __timer = Timer()
 
     def __init__(self, leftSensorPort: Triport.TriportPort, rightSensorPort: Triport.TriportPort):
         self.leftSensor = Line(leftSensorPort)
@@ -140,7 +141,7 @@ class LineSensorArray:
         self.periodic()
 
     def periodic(self):
-        self.__timer.event(self.periodic, Constants.LOOP_PERIOD_MS)
+        timer.event(self.periodic, Constants.LOOP_PERIOD_MS)
 
         if self.onLine():
             self.__lastSensorOnLine = None
@@ -180,17 +181,25 @@ class Vision:
     currentSnapshot = None
     previousSnapshot = None
     currentFruit = None
+    def __init__(self) -> None:
+        self.periodic()
 
     def periodic(self):
         self.previousSnapshot = self.currentSnapshot
         self.currentSnapshot = self.vision.take_snapshot(self.currentFruit)
+        timer.event(self.periodic, Constants.LOOP_PERIOD_MS)
 
     def changeFruit(self, fruit: Signature):
         self.currentFruit = fruit
 
-    def getXOffset(self):
-        return self.vision.largest_object().centerX
+    def hasFruit(self):
+        return self.currentSnapshot
 
+    def getXOffset(self):
+        return (160 - self.vision.largest_object().centerX)
+
+    def getYOffset(self):
+        return self.vision.largest_object().centerY
 
 
 class Drive:
@@ -208,8 +217,6 @@ class Drive:
     gyro = Inertial(DevicePorts.GYRO)
 
     odometry = Odometry(0.0, 0.0, 0.0)
-
-    __timer = Timer()
 
     def __init__(self, heading = 0.0, calibrateGyro = False):
         if calibrateGyro:
@@ -238,7 +245,7 @@ class Drive:
         return (speedRadPerSec * Constants.WHEEL_CIRCUMFERENCE_IN * 60) / (2 * math.pi * Constants.WHEEL_CIRCUMFERENCE_IN)
 
     def periodic(self):
-        self.__timer.event(self.periodic, Constants.LOOP_PERIOD_MS)
+        timer.event(self.periodic, Constants.LOOP_PERIOD_MS)
 
         self.odometry.update(
             self.getActualDirectionOfTravelRad(),
@@ -414,10 +421,11 @@ class Lift:
     rightLift.set_velocity(Constants.LIFT_SPEED, RPM)
 
     def __init__(self):
-        pass
+        self.periodic()
 
     def periodic(self):
-        pass
+        timer.event(self.periodic, Constants.LOOP_PERIOD_MS)
+
 
     def setStowPosition(self):
         self.leftLift.spin_to_position(self.STOW_POSITION, TURNS, False)
@@ -436,11 +444,11 @@ class Lift:
         self.rightLift.spin_to_position(self.HIGH_POSITION, TURNS, True)
 
     def setUltrasonicPosition(self):
-        if (math.isclose(self.ultrasonic.distance(INCHES), self.LOW_POSITION)):
+        if (abs(self.ultrasonic.distance(INCHES) - self.LOW_POSITION) < 0.01):
             self.setLowPosition()
-        elif (math.isclose(self.ultrasonic.distance(INCHES), self.MID_POSITION)):
+        if (abs(self.ultrasonic.distance(INCHES) - self.MID_POSITION) < 0.01):
             self.setMidPosition()
-        elif (math.isclose(self.ultrasonic.distance(INCHES), self.HIGH_POSITION)):
+        if (abs(self.ultrasonic.distance(INCHES) - self.HIGH_POSITION) < 0.01):
             self.setHighPosition()
 
     def stop(self):
@@ -458,10 +466,10 @@ class Gate:
     UNLOCKED_POSITION = 90.0
 
     def __init__(self) -> None:
-        pass
+        self.periodic()
 
     def periodic(self):
-        pass
+        timer.event(self.periodic, Constants.LOOP_PERIOD_MS)
 
     def setLockedPosition(self):
         self.leftGate.spin_to_position(self.LOCKED_POSITION, DEGREES)
@@ -472,9 +480,6 @@ class Gate:
 
 state = 0
 
-
-timer = Timer()
-
 drive = Drive()
 lift = Lift()
 gate = Gate()
@@ -483,11 +488,31 @@ vision = Vision()
 frontLine = LineSensorArray(DevicePorts.FL_LINE, DevicePorts.FR_LINE)
 
 
+def strafe():
+    global state
+    if (vision.hasFruit()):
+        drive.stop()
+    else:
+        drive.applySpeeds(math.pi / 2, 0.1, 0, True)
 
-
+def center():
+    global state
+    Kp = 0.001
+    if (vision.hasFruit()):
+        error = vision.getXOffset()
+    else:
+        error = 0
+    effort = error * Kp
+    print(effort)
+    drive.applySpeeds(math.pi / 2, effort, 0, True)
 
 def robotPeriodic():
     timer.event(robotPeriodic, Constants.LOOP_PERIOD_MS)
     
+vision.changeFruit(Constants.LEMON)
+
+drive.gyro.calibrate()
+while (drive.gyro.is_calibrating()):
+    pass
 
 robotPeriodic()
