@@ -8,7 +8,7 @@
 # ---------------------------------------------------------------------------- #
 
 # Library imports
-from vex import *
+from vex import * # type: ignore
 
 # Brain should be defined by default
 brain = Brain()
@@ -16,6 +16,24 @@ brain = Brain()
 controller = Controller()
 
 timer = Timer()
+
+class States:
+    IDLE = 0
+    INIT = 1
+    FOLLOW_LINE_ODOMETRY = 2
+    FACE_DIRECTION = 3
+    FIND_FRUIT = 4
+    PICK_FRUIT = 5
+    FOLLOW_LINE_ULTRASONIC = 6
+    FIND_BASKET = 7
+    DUMP_FRUIT = 8
+    FIND_LINE = 9
+    CHANGE_FRUIT = 10
+
+class FRUIT_TYPE:
+    LIME = Signature(3, -5513, -3161, -4337, -3823, -2027, -2925, 2.5, 0)
+    LEMON = Signature(1, 3231, 3841, 3536, -3355, -2697, -3026, 5.5, 0)
+    TANGERINE = Signature(2, 7447, 8539, 7993, -1977, -1525, -1751, 9, 0)
 
 class DevicePorts:
     
@@ -36,6 +54,8 @@ class DevicePorts:
 
     FL_LINE = brain.three_wire_port.g
     FR_LINE = brain.three_wire_port.b
+
+    BUTTON = brain.three_wire_port.d
 
 class Constants:
         
@@ -63,6 +83,7 @@ class Constants:
         DRIVE_FIND_LINE_SPEED_METERS_PER_SEC = 0.2
 
         DRIVE_FOLLOW_LINE_SPEED_METERS_PER_SEC = 0.2
+        ODOM_TOLERANCE_METERS = 0.0025
 
         ODOM_X_POSITIVE_DRIFT = 194 / 200
         ODOM_X_NEGATIVE_DRIFT = 207 / 200
@@ -85,9 +106,7 @@ class Constants:
 
         BRIGHTNESS = 41
 
-        LIME = Signature(3, -5513, -3161, -4337, -3823, -2027, -2925, 2.5, 0)
-        LEMON = Signature(1, 3231, 3841, 3536, -3355, -2697, -3026, 5.5, 0)
-        TANGERINE = Signature(2, 7447, 8539, 7993, -1977, -1525, -1751, 9, 0)
+        FRUIT_CENTERING_TOLERANCE = 0.01
 
 
 
@@ -177,7 +196,7 @@ class LineSensorArray:
 
 
 class Vision:
-    vision = Vision(DevicePorts.VISION, Constants.BRIGHTNESS, Constants.LEMON, Constants.LEMON, Constants.TANGERINE)
+    vision = Vision(DevicePorts.VISION, Constants.BRIGHTNESS, FRUIT_TYPE.LEMON, FRUIT_TYPE.LEMON, FRUIT_TYPE.TANGERINE)
     currentSnapshot = None
     previousSnapshot = None
     currentFruit = None
@@ -486,6 +505,7 @@ gate = Gate()
 vision = Vision()
 
 frontLine = LineSensorArray(DevicePorts.FL_LINE, DevicePorts.FR_LINE)
+button = Bumper(DevicePorts.BUTTON)
 
 
 def strafe():
@@ -506,13 +526,81 @@ def center():
     print(effort)
     drive.applySpeeds(math.pi / 2, effort, 0, True)
 
+
+
+currentState = States.IDLE
+rowCount = 0
+
+def handleButton():
+    global currentState
+    if currentState == States.IDLE:
+        currentState = States.INIT
+        sleep(500)
+    elif currentState == States.INIT:
+        currentState = States.FOLLOW_LINE_ODOMETRY
+        sleep(500)
+    else:
+        currentState = States.INIT
+        sleep(500)
+
+def IDLE():
+    global currentState
+    drive.stop()
+    lift.stop()
+
+def INIT():
+    global currentState
+    # init things here
+
+def FOLLOW_LINE_ODOMETRY(line: TurnType.TurnType, odom_x_target: float):
+    global currentState
+    drive.odometry.yMeters = Constants.LEFT_LINE_Y_METERS if line == LEFT else Constants.RIGTH_LINE_Y_METERS
+    drive.followLine(odom_x_target, drive.odometry.yMeters, 0.2, frontLine, True)
+    if (abs(drive.odometry.xMeters - odom_x_target) < Constants.ODOM_TOLERANCE_METERS):
+        drive.stop()
+        currentState = States.FACE_DIRECTION
+
+def FACE_DIRECTION(direction: DirectionType):
+    global currentState
+    Kp = 1
+    target = 0 if direction == DirectionType.FORWARD else math.pi
+    error = target - drive.odometry.thetaRad
+    effort = error * Kp
+    drive.applySpeeds(0, 0, effort, False)
+    if (abs(error) < 0.1):
+        drive.stop()
+        currentState = States.FIND_FRUIT
+
+def FIND_FRUIT(fromLine: TurnType.TurnType):
+    global currentState
+    direction = (3 * math.pi / 2) if fromLine == LEFT else math.pi / 2
+    if (vision.hasFruit()):
+        Kp = 0.001
+        if (vision.hasFruit()):
+            error = vision.getXOffset()
+        else:
+            error = 0
+        effort = error * Kp
+        drive.applySpeeds(direction, effort, 0, True)
+        if (abs(error < Constants.FRUIT_CENTERING_TOLERANCE)):
+            drive.stop()
+            currentState = States.PICK_FRUIT
+    else:
+        drive.applySpeeds(direction, 0.2, 0, True)
+
+
 def robotPeriodic():
     timer.event(robotPeriodic, Constants.LOOP_PERIOD_MS)
     
-vision.changeFruit(Constants.LEMON)
 
-drive.gyro.calibrate()
-while (drive.gyro.is_calibrating()):
-    pass
+
+
+
+
+
+
+
+
+
 
 robotPeriodic()
