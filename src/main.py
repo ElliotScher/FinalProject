@@ -37,12 +37,12 @@ class FRUIT_TYPE:
 
 class DevicePorts:
     
-    FL_DRIVE = Ports.PORT20
-    FR_DRIVE = Ports.PORT9
-    BL_DRIVE = Ports.PORT17
-    BR_DRIVE = Ports.PORT10
+    FL_DRIVE = Ports.PORT17
+    FR_DRIVE = Ports.PORT10
+    BL_DRIVE = Ports.PORT20
+    BR_DRIVE = Ports.PORT9
 
-    GYRO = Ports.PORT5
+    GYRO = Ports.PORT8
 
     LEFT_LIFT = Ports.PORT18
     RIGHT_LIFT = Ports.PORT7
@@ -57,7 +57,7 @@ class DevicePorts:
 
     BUTTON = brain.three_wire_port.d
 
-class Constants:
+class RobotConstants:
         
         LOOP_PERIOD_MS = 20
         
@@ -74,9 +74,9 @@ class Constants:
 
         DRIVE_TRAIN_IDLE_MODE = BRAKE
 
-        DRIVE_TRANSLATION_KP = 0.16
+        DRIVE_TRANSLATION_KP = 1.5
 
-        DRIVE_ROTATION_KP = 0.8
+        DRIVE_ROTATION_KP = 1.5
 
         DRIVE_MAX_SPEED_METERS_PER_SEC = 0.2
 
@@ -98,18 +98,21 @@ class Constants:
         FOLLOW_LINE_KP = 0
         FOLLOW_LINE_KD = 0
 
-
-        LEFT_LINE_Y_METERS = 0 # FIXME
-        RIGTH_LINE_Y_METERS = 0 # FIXME
-
         LIFT_SPEED = 150
 
         BRIGHTNESS = 41
 
-        FRUIT_CENTERING_TOLERANCE = 0.01
+        FRUIT_CENTERING_TOLERANCE = 15 #px
+
+        APPROACH_DISTANCE = 0.25
 
 
 
+class FieldConstants:
+    LEFT_LINE_Y_METERS = 2.205
+    RIGHT_LINE_Y_METERS = 0.28
+
+    FIRST_ROW_X_METERS = 0.6875
 
 
 class Odometry:
@@ -132,16 +135,16 @@ class Odometry:
         yDelta = translationDeltaMeters * math.sin(fieldOrientedTranslationRad)
 
         if(yDelta > 0.0):
-            yDelta *= (Constants.ODOM_Y_POSITIVE_DRIFT ** driftCompPercentage)
+            yDelta *= (RobotConstants.ODOM_Y_POSITIVE_DRIFT ** driftCompPercentage)
         else:
-            yDelta *= (Constants.ODOM_Y_NEGATIVE_DRIFT ** driftCompPercentage)
+            yDelta *= (RobotConstants.ODOM_Y_NEGATIVE_DRIFT ** driftCompPercentage)
 
         if(xDelta > 0.0):
-            xDelta *= (Constants.ODOM_X_POSITIVE_DRIFT ** driftCompPercentage)
-            yDelta += ((xDelta * Constants.ODOM_Y_DRIFT_PER_POSITIVE_X_TRANSLATION) * driftCompPercentage)
+            xDelta *= (RobotConstants.ODOM_X_POSITIVE_DRIFT ** driftCompPercentage)
+            yDelta += ((xDelta * RobotConstants.ODOM_Y_DRIFT_PER_POSITIVE_X_TRANSLATION) * driftCompPercentage)
         else:
-            xDelta *= (Constants.ODOM_X_NEGATIVE_DRIFT ** driftCompPercentage)
-            yDelta += ((xDelta * Constants.ODOM_Y_DRIFT_PER_NEGATIVE_X_TRANSLATION) * driftCompPercentage)
+            xDelta *= (RobotConstants.ODOM_X_NEGATIVE_DRIFT ** driftCompPercentage)
+            yDelta += ((xDelta * RobotConstants.ODOM_Y_DRIFT_PER_NEGATIVE_X_TRANSLATION) * driftCompPercentage)
 
         self.xMeters += xDelta
         self.yMeters += yDelta
@@ -153,36 +156,32 @@ class Odometry:
 
 class LineSensorArray:
     __prevError = 0.0
-    __timer = Timer()
 
     def __init__(self, leftSensorPort: Triport.TriportPort, rightSensorPort: Triport.TriportPort):
         self.leftSensor = Line(leftSensorPort)
         self.rightSensor = Line(rightSensorPort)
         
-        self.periodic()
-
     def periodic(self):
-        self.__timer.event(self.periodic, Constants.LOOP_PERIOD_MS)
 
         if self.onLine():
             self.__lastSensorOnLine = None
-        elif self.rightSensor.reflectivity() > Constants.LINE_REFLECTIVITY_THRESHOLD:
+        elif self.rightSensor.reflectivity() > RobotConstants.LINE_REFLECTIVITY_THRESHOLD:
             self.__lastSensorOnLine = RIGHT
-        elif self.leftSensor.reflectivity() > Constants.LINE_REFLECTIVITY_THRESHOLD:
+        elif self.leftSensor.reflectivity() > RobotConstants.LINE_REFLECTIVITY_THRESHOLD:
             self.__lastSensorOnLine = LEFT
 
-        self.__rate = (self.getError() - self.__prevError) / (Constants.LOOP_PERIOD_MS / 1000)
+        self.__rate = (self.getError() - self.__prevError) / (RobotConstants.LOOP_PERIOD_MS / 1000)
         self.__prevError = self.getError()
 
     def hasLine(self):
         '''Line is detected by at least one sensor'''
-        return self.rightSensor.reflectivity() > Constants.LINE_REFLECTIVITY_THRESHOLD \
-            or self.leftSensor.reflectivity() > Constants.LINE_REFLECTIVITY_THRESHOLD
+        return self.rightSensor.reflectivity() > RobotConstants.LINE_REFLECTIVITY_THRESHOLD \
+            or self.leftSensor.reflectivity() > RobotConstants.LINE_REFLECTIVITY_THRESHOLD
     
     def onLine(self):
         '''Line is detected by both sensors'''
-        return self.rightSensor.reflectivity() > Constants.LINE_REFLECTIVITY_THRESHOLD \
-            and self.leftSensor.reflectivity() > Constants.LINE_REFLECTIVITY_THRESHOLD
+        return self.rightSensor.reflectivity() > RobotConstants.LINE_REFLECTIVITY_THRESHOLD \
+            and self.leftSensor.reflectivity() > RobotConstants.LINE_REFLECTIVITY_THRESHOLD
 
     def getError(self) -> float:
         return self.rightSensor.reflectivity() - self.leftSensor.reflectivity()
@@ -205,16 +204,14 @@ class Drive:
     blDrive = Motor(DevicePorts.BL_DRIVE)
     brDrive = Motor(DevicePorts.BR_DRIVE)
 
-    flDrive.set_stopping(Constants.DRIVE_TRAIN_IDLE_MODE)
-    frDrive.set_stopping(Constants.DRIVE_TRAIN_IDLE_MODE)
-    blDrive.set_stopping(Constants.DRIVE_TRAIN_IDLE_MODE)
-    brDrive.set_stopping(Constants.DRIVE_TRAIN_IDLE_MODE)
+    flDrive.set_stopping(RobotConstants.DRIVE_TRAIN_IDLE_MODE)
+    frDrive.set_stopping(RobotConstants.DRIVE_TRAIN_IDLE_MODE)
+    blDrive.set_stopping(RobotConstants.DRIVE_TRAIN_IDLE_MODE)
+    brDrive.set_stopping(RobotConstants.DRIVE_TRAIN_IDLE_MODE)
 
     gyro = Inertial(DevicePorts.GYRO)
 
-    odometry = Odometry(0.0, 0.0, 0.0)
-
-    __timer = Timer()
+    odometry = Odometry(0.15875, FieldConstants.RIGHT_LINE_Y_METERS, 0.0)
 
     def __init__(self, heading = 0.0, calibrateGyro = False):
         if calibrateGyro:
@@ -224,23 +221,22 @@ class Drive:
             print("GYRO CALIBRATED")
             self.gyro.set_heading(heading)
         
-        self.periodic()
 
     @staticmethod
     def __revolutionsToMeters(revolutions) -> float:
-        return (revolutions * Constants.WHEEL_CIRCUMFERENCE_IN) / (39.3701)
+        return (revolutions * RobotConstants.WHEEL_CIRCUMFERENCE_IN) / (39.3701)
 
     @staticmethod
     def __metersPerSecToRPM(speedMetersPerSec) -> float:
-        return (speedMetersPerSec * 39.3701 * 60) / (Constants.WHEEL_CIRCUMFERENCE_IN)
+        return (speedMetersPerSec * 39.3701 * 60) / (RobotConstants.WHEEL_CIRCUMFERENCE_IN)
     
     @staticmethod
     def __rpmToMetersPerSecond(speedMetersPerSec) -> float:
-        return (speedMetersPerSec * Constants.WHEEL_CIRCUMFERENCE_IN) / (39.3701 * 60)
+        return (speedMetersPerSec * RobotConstants.WHEEL_CIRCUMFERENCE_IN) / (39.3701 * 60)
     
     @staticmethod
     def __radPerSecToRPM(speedRadPerSec) -> float:
-        return (speedRadPerSec * Constants.WHEEL_CIRCUMFERENCE_IN * 60) / (2 * math.pi * Constants.WHEEL_CIRCUMFERENCE_IN)
+        return (speedRadPerSec * RobotConstants.WHEEL_CIRCUMFERENCE_IN * 60) / (2 * math.pi * RobotConstants.WHEEL_CIRCUMFERENCE_IN)
     
     def calcThetaControlRadPerSec(self, targetHeadingRad: float) -> float:
         thetaError = targetHeadingRad - self.odometry.thetaRad
@@ -250,11 +246,9 @@ class Drive:
         elif thetaError < -math.pi:
             thetaError += 2 * math.pi
 
-        return thetaError * Constants.DRIVE_ROTATION_KP
+        return thetaError * RobotConstants.DRIVE_ROTATION_KP
 
     def periodic(self):
-        self.__timer.event(self.periodic, Constants.LOOP_PERIOD_MS)
-
         self.odometry.update(
             self.getActualDirectionOfTravelRad(),
             self.getDistanceTraveledMeters(),
@@ -263,8 +257,8 @@ class Drive:
 
     def applyDesaturated(self, flSpeedRPM, frSpeedRPM, blSpeedRPM, brSpeedRPM):
         fastestSpeedRPM = max(abs(flSpeedRPM), abs(frSpeedRPM), abs(blSpeedRPM), abs(brSpeedRPM))
-        if(fastestSpeedRPM > Constants.MOTOR_MAX_SPEED_RPM):
-            ratio = Constants.MOTOR_MAX_SPEED_RPM / fastestSpeedRPM
+        if(fastestSpeedRPM > RobotConstants.MOTOR_MAX_SPEED_RPM):
+            ratio = RobotConstants.MOTOR_MAX_SPEED_RPM / fastestSpeedRPM
 
             flSpeedRPM *= ratio
             frSpeedRPM *= ratio
@@ -291,7 +285,7 @@ class Drive:
             directionRad += self.gyro.heading(RotationUnits.REV) * 2 * math.pi
 
         # find the x and y components of the direction vector mapped to a wheel vector
-        coeffRPM = Constants.SEC_PHI * translationRPM
+        coeffRPM = RobotConstants.SEC_PHI * translationRPM
         xProjectionRPM = coeffRPM * math.sin(directionRad)
         yProjectionRPM = coeffRPM * math.cos(directionRad)
 
@@ -374,33 +368,35 @@ class Drive:
         xError = xMeters - self.odometry.xMeters
         yError = yMeters - self.odometry.yMeters
 
-        xEffort = xError * Constants.DRIVE_TRANSLATION_KP
-        yEffort = yError * Constants.DRIVE_TRANSLATION_KP
+        xEffort = xError * RobotConstants.DRIVE_TRANSLATION_KP
+        yEffort = yError * RobotConstants.DRIVE_TRANSLATION_KP
 
         direction = math.atan2(yEffort, xEffort)
         magnitude = math.sqrt(xError**2 + yError**2)
 
-        if abs(magnitude) > Constants.DRIVE_MAX_SPEED_METERS_PER_SEC:
-            magnitude = math.copysign(Constants.DRIVE_MAX_SPEED_METERS_PER_SEC, magnitude)
+        if abs(magnitude) > RobotConstants.DRIVE_MAX_SPEED_METERS_PER_SEC:
+            magnitude = math.copysign(RobotConstants.DRIVE_MAX_SPEED_METERS_PER_SEC, magnitude)
 
+        
         self.applySpeeds(direction, magnitude, self.calcThetaControlRadPerSec(headingRad), True)
 
+
     def followLine(self, odomXMetersTarget: float, odomLineYMeters: float, lineSensorArray: LineSensorArray, headingRad = 0.0, findLineIfOff = True):
-        driveEffort = (odomXMetersTarget - self.odometry.xMeters) * Constants.DRIVE_TRANSLATION_KP
-        if abs(driveEffort) > Constants.DRIVE_FOLLOW_LINE_SPEED_METERS_PER_SEC:
-            driveEffort = math.copysign(Constants.DRIVE_FOLLOW_LINE_SPEED_METERS_PER_SEC, driveEffort)
+        driveEffort = (odomXMetersTarget - self.odometry.xMeters) * RobotConstants.DRIVE_TRANSLATION_KP
+        if abs(driveEffort) > RobotConstants.DRIVE_FOLLOW_LINE_SPEED_METERS_PER_SEC:
+            driveEffort = math.copysign(RobotConstants.DRIVE_FOLLOW_LINE_SPEED_METERS_PER_SEC, driveEffort)
         
         if lineSensorArray.hasLine():
             self.odometry.yMeters = odomLineYMeters
 
-            strafeEffort = lineSensorArray.getError() * Constants.FOLLOW_LINE_KP + lineSensorArray.getRate() * Constants.FOLLOW_LINE_KD
+            strafeEffort = lineSensorArray.getError() * RobotConstants.FOLLOW_LINE_KP + lineSensorArray.getRate() * RobotConstants.FOLLOW_LINE_KD
 
             self.applySpeedsCartesian(driveEffort, strafeEffort, self.calcThetaControlRadPerSec(headingRad), True)
         elif findLineIfOff:
             if lineSensorArray.getLastSensorOnLine() == RIGHT:
-                self.applySpeedsCartesian(driveEffort, -Constants.DRIVE_FIND_LINE_SPEED_METERS_PER_SEC, self.calcThetaControlRadPerSec(headingRad), True)
+                self.applySpeedsCartesian(driveEffort, -RobotConstants.DRIVE_FIND_LINE_SPEED_METERS_PER_SEC, self.calcThetaControlRadPerSec(headingRad), True)
             elif lineSensorArray.getLastSensorOnLine() == LEFT:
-                self.applySpeedsCartesian(driveEffort, Constants.DRIVE_FIND_LINE_SPEED_METERS_PER_SEC, self.calcThetaControlRadPerSec(headingRad), True)
+                self.applySpeedsCartesian(driveEffort, RobotConstants.DRIVE_FIND_LINE_SPEED_METERS_PER_SEC, self.calcThetaControlRadPerSec(headingRad), True)
             else:
                 self.stop()
 
@@ -409,17 +405,14 @@ class Drive:
 
 
 class Vision:
-    vision = Vision(DevicePorts.VISION, Constants.BRIGHTNESS, FRUIT_TYPE.LEMON, FRUIT_TYPE.LEMON, FRUIT_TYPE.TANGERINE)
+    vision = Vision(DevicePorts.VISION, RobotConstants.BRIGHTNESS, FRUIT_TYPE.LIME, FRUIT_TYPE.LEMON, FRUIT_TYPE.TANGERINE)
     currentSnapshot = None
     previousSnapshot = None
-    currentFruit = None
-    def __init__(self) -> None:
-        self.periodic()
+    currentFruit = FRUIT_TYPE.LEMON
 
     def periodic(self):
         self.previousSnapshot = self.currentSnapshot
         self.currentSnapshot = self.vision.take_snapshot(self.currentFruit)
-        timer.event(self.periodic, Constants.LOOP_PERIOD_MS)
 
     def changeFruit(self, fruit: Signature):
         self.currentFruit = fruit
@@ -450,35 +443,31 @@ class Lift:
     PINION_CIRCUMFERENCE_IN = 0.5
 
     STOW_POSITION = 0.025
-    LOW_POSITION = 0.15
+    LOW_POSITION = 0.2
     MID_POSITION = 3.0
     HIGH_POSITION = 5.5
 
-    leftLift.set_velocity(Constants.LIFT_SPEED, RPM)
-    rightLift.set_velocity(Constants.LIFT_SPEED, RPM)
-
-    def __init__(self):
-        self.periodic()
+    leftLift.set_velocity(RobotConstants.LIFT_SPEED, RPM)
+    rightLift.set_velocity(RobotConstants.LIFT_SPEED, RPM)
 
     def periodic(self):
-        timer.event(self.periodic, Constants.LOOP_PERIOD_MS)
-
+        pass
 
     def setStowPosition(self):
         self.leftLift.spin_to_position(self.STOW_POSITION, TURNS, False)
-        self.rightLift.spin_to_position(self.STOW_POSITION, TURNS, True)
+        self.rightLift.spin_to_position(self.STOW_POSITION, TURNS, False)
 
     def setLowPosition(self):
         self.leftLift.spin_to_position(self.LOW_POSITION, TURNS, False)
-        self.rightLift.spin_to_position(self.LOW_POSITION, TURNS, True)
+        self.rightLift.spin_to_position(self.LOW_POSITION, TURNS, False)
 
     def setMidPosition(self):
         self.leftLift.spin_to_position(self.MID_POSITION, TURNS, False)
-        self.rightLift.spin_to_position(self.MID_POSITION, TURNS, True)
+        self.rightLift.spin_to_position(self.MID_POSITION, TURNS, False)
 
     def setHighPosition(self):
         self.leftLift.spin_to_position(self.HIGH_POSITION, TURNS, False)
-        self.rightLift.spin_to_position(self.HIGH_POSITION, TURNS, True)
+        self.rightLift.spin_to_position(self.HIGH_POSITION, TURNS, False)
 
     def setUltrasonicPosition(self):
         if (abs(self.ultrasonic.distance(INCHES) - self.LOW_POSITION) < 0.01):
@@ -503,10 +492,10 @@ class Gate:
     UNLOCKED_POSITION = 90.0
 
     def __init__(self) -> None:
-        self.periodic()
+        pass
 
     def periodic(self):
-        timer.event(self.periodic, Constants.LOOP_PERIOD_MS)
+        pass
 
     def setLockedPosition(self):
         self.leftGate.spin_to_position(self.LOCKED_POSITION, DEGREES)
@@ -515,9 +504,7 @@ class Gate:
         self.leftGate.spin_to_position(self.UNLOCKED_POSITION, DEGREES)
 
 
-state = 0
-
-drive = Drive()
+drive = Drive(False)
 lift = Lift()
 gate = Gate()
 vision = Vision()
@@ -526,27 +513,8 @@ frontLine = LineSensorArray(DevicePorts.FL_LINE, DevicePorts.FR_LINE)
 button = Bumper(DevicePorts.BUTTON)
 
 
-def strafe():
-    global state
-    if (vision.hasFruit()):
-        drive.stop()
-    else:
-        drive.applySpeeds(math.pi / 2, 0.1, 0, True)
-
-def center():
-    global state
-    Kp = 0.001
-    if (vision.hasFruit()):
-        error = vision.getXOffset()
-    else:
-        error = 0
-    effort = error * Kp
-    print(effort)
-    drive.applySpeeds(math.pi / 2, effort, 0, True)
-
-
-
-currentState = States.IDLE
+currentState = States.FOLLOW_LINE_ODOMETRY
+fruitPicked = 0
 rowCount = 0
 
 def handleButton():
@@ -572,12 +540,12 @@ def INIT():
 
 def FOLLOW_LINE_ODOMETRY(line: TurnType.TurnType, xOdomTarget: float):
     global currentState
-    drive.followLine(xOdomTarget, Constants.LEFT_LINE_Y_METERS if line == LEFT else Constants.RIGTH_LINE_Y_METERS, frontLine, True)
-    if (abs(drive.odometry.xMeters - xOdomTarget) < Constants.ODOM_TOLERANCE_METERS):
+    drive.followLine(xOdomTarget, FieldConstants.LEFT_LINE_Y_METERS if line == LEFT else FieldConstants.RIGHT_LINE_Y_METERS, frontLine)
+    if (abs(drive.odometry.xMeters - xOdomTarget) < RobotConstants.ODOM_TOLERANCE_METERS):
         drive.stop()
         currentState = States.FACE_DIRECTION
 
-def FACE_DIRECTION(direction: DirectionType):
+def FACE_DIRECTION(direction: DirectionType.DirectionType):
     global currentState
     Kp = 1
     target = 0 if direction == DirectionType.FORWARD else math.pi
@@ -590,34 +558,69 @@ def FACE_DIRECTION(direction: DirectionType):
 
 def FIND_FRUIT(fromLine: TurnType.TurnType):
     global currentState
-    direction = (3 * math.pi / 2) if fromLine == LEFT else math.pi / 2
+    xError = FieldConstants.FIRST_ROW_X_METERS - drive.odometry.xMeters
+    print(xError)
+    xEffort = xError * RobotConstants.DRIVE_TRANSLATION_KP
+    if(abs(xEffort) > 0.1):
+        xEffort = math.copysign(0.1, xEffort)
     if (vision.hasFruit()):
         Kp = 0.001
-        if (vision.hasFruit()):
-            error = vision.getXOffset()
-        else:
-            error = 0
-        effort = error * Kp
-        drive.applySpeeds(direction, effort, 0, True)
-        if (abs(error < Constants.FRUIT_CENTERING_TOLERANCE)):
+        yError = 0 - vision.getXOffset()
+        yEffort = yError * Kp
+        drive.applySpeedsCartesian(xEffort, yEffort, drive.calcThetaControlRadPerSec(0), True)
+        if (abs(yError) < RobotConstants.FRUIT_CENTERING_TOLERANCE):
             drive.stop()
             currentState = States.PICK_FRUIT
+
     else:
-        drive.applySpeeds(direction, 0.2, 0, True)
+        drive.applySpeedsCartesian(xEffort, 0.1 if fromLine == RIGHT else -0.1, drive.calcThetaControlRadPerSec(0), True)
+
+
+def PICK_FRUIT():
+    global currentState
+    global fruitPicked
+    lift.setLowPosition()
+    if (lift.leftLift.position() >= 0.2):
+        desiredX = FieldConstants.FIRST_ROW_X_METERS + RobotConstants.APPROACH_DISTANCE
+        desiredY = drive.odometry.yMeters
+        desiredTheta = drive.odometry.thetaRad
+        if (abs(desiredX - drive.odometry.xMeters) > 0.01):
+            drive.driveToPosition(desiredX, desiredY, desiredTheta)
+        else:
+            drive.stop()
+            lift.setStowPosition()
+            if (lift.leftLift.position() >= 0.025):
+                fruitPicked += 1
+                currentState = States.FIND_FRUIT
+
+
+
+
+drive.gyro.calibrate()
+while drive.gyro.is_calibrating():
+    pass
+print("GYRO CALIBRATED")
+drive.gyro.set_heading(0.0)
+
 
 
 def robotPeriodic():
-    timer.event(robotPeriodic, Constants.LOOP_PERIOD_MS)
+    timer.event(robotPeriodic, RobotConstants.LOOP_PERIOD_MS)
+    drive.periodic()
+    lift.periodic()
+    gate.periodic()
+    vision.periodic()
+    frontLine.periodic()
+    print(currentState)
+    if (currentState == States.FOLLOW_LINE_ODOMETRY):
+        FOLLOW_LINE_ODOMETRY(RIGHT, FieldConstants.FIRST_ROW_X_METERS)
+    if (currentState == States.FACE_DIRECTION):
+        FACE_DIRECTION(FORWARD)
+    if (currentState == States.FIND_FRUIT):
+        FIND_FRUIT(RIGHT)
+    if (currentState == States.PICK_FRUIT):
+        PICK_FRUIT()
+
+    # print("x: " + str(drive.odometry.xMeters), "y: " + str(drive.odometry.yMeters), "theta: " + str(drive.odometry.thetaRad))
     
-
-
-
-
-
-
-
-
-
-
-
 robotPeriodic()
