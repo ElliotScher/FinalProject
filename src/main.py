@@ -77,7 +77,7 @@ class RobotConstants:
 
         DRIVE_TRANSLATION_KP = 1.5
 
-        DRIVE_ROTATION_KP = 1.5
+        DRIVE_ROTATION_KP = 7.5
 
         DRIVE_MAX_SPEED_METERS_PER_SEC = 0.2
 
@@ -105,7 +105,7 @@ class RobotConstants:
 
         FRUIT_CENTERING_TOLERANCE_PX = 15 #px
 
-        APPROACH_DISTANCE = 0.25
+        APPROACH_DISTANCE = 0.2
 
 
 
@@ -113,7 +113,7 @@ class FieldConstants:
     LEFT_LINE_Y_METERS = 2.205
     RIGHT_LINE_Y_METERS = 0.28
 
-    FIRST_ROW_X_METERS = 0.6875
+    FIRST_ROW_X_METERS = 0.7
 
 
 class Odometry:
@@ -130,7 +130,7 @@ class Odometry:
 
         # As the wheels approach parallel/orthoginal to the drive direction, we don't need to compensate for carpet drift
         robotRelativeTranslationRad = fieldOrientedTranslationRad + headingRad
-        driftCompPercentage = abs(math.cos((2 * robotRelativeTranslationRad) % math.pi))
+        driftCompPercentage = 1 # abs(math.cos((2 * robotRelativeTranslationRad) % math.pi))
 
         xDelta = translationDeltaMeters * math.cos(fieldOrientedTranslationRad)
         yDelta = translationDeltaMeters * math.sin(fieldOrientedTranslationRad)
@@ -220,7 +220,9 @@ class Drive:
             while self.gyro.is_calibrating():
                 pass
             print("GYRO CALIBRATED")
-            self.gyro.set_heading(heading)
+        
+        self.gyro.set_heading(heading)
+        self.odometry.thetaRad = heading
         
 
     @staticmethod
@@ -243,11 +245,11 @@ class Drive:
         thetaError = targetHeadingRad - self.odometry.thetaRad
 
         if thetaError > math.pi:
-            thetaError -= 2 * math.pi
+            thetaError -= (2 * math.pi)
         elif thetaError < -math.pi:
-            thetaError += 2 * math.pi
+            thetaError += (2 * math.pi)
 
-        return thetaError * RobotConstants.DRIVE_ROTATION_KP
+        return -thetaError * RobotConstants.DRIVE_ROTATION_KP
 
     def periodic(self):
         self.odometry.update(
@@ -448,6 +450,8 @@ class Lift:
     MID_POSITION = 3.0
     HIGH_POSITION = 5.5
 
+    target = 0
+
     leftLift.set_velocity(RobotConstants.LIFT_SPEED, RPM)
     rightLift.set_velocity(RobotConstants.LIFT_SPEED, RPM)
 
@@ -455,18 +459,25 @@ class Lift:
         pass
 
     def setStowPosition(self):
+        self.target = self.STOW_POSITION
         self.leftLift.spin_to_position(self.STOW_POSITION, TURNS, False)
         self.rightLift.spin_to_position(self.STOW_POSITION, TURNS, False)
 
     def setLowPosition(self):
+        self.target = self.LOW_POSITION
+
         self.leftLift.spin_to_position(self.LOW_POSITION, TURNS, False)
         self.rightLift.spin_to_position(self.LOW_POSITION, TURNS, False)
 
     def setMidPosition(self):
+        self.target = self.MID_POSITION
+
         self.leftLift.spin_to_position(self.MID_POSITION, TURNS, False)
         self.rightLift.spin_to_position(self.MID_POSITION, TURNS, False)
 
     def setHighPosition(self):
+        self.target = self.HIGH_POSITION
+
         self.leftLift.spin_to_position(self.HIGH_POSITION, TURNS, False)
         self.rightLift.spin_to_position(self.HIGH_POSITION, TURNS, False)
 
@@ -481,7 +492,8 @@ class Lift:
     def stop(self):
         self.leftLift.stop()
 
-
+    def atPosition(self):
+        return (abs(self.target - self.leftLift.position(TURNS)) < 0.2)
 
 
 class Gate:
@@ -505,7 +517,7 @@ class Gate:
         self.leftGate.spin_to_position(self.UNLOCKED_POSITION, DEGREES)
 
 
-drive = Drive(False)
+drive = Drive(0.0, False)
 lift = Lift()
 gate = Gate()
 vision = Vision()
@@ -542,10 +554,10 @@ def INIT():
 def FOLLOW_LINE_ODOMETRY(line: TurnType.TurnType, xOdomTarget: float):
     global currentState
     global previousState
-    drive.followLine(xOdomTarget, FieldConstants.LEFT_LINE_Y_METERS if line == LEFT else FieldConstants.RIGHT_LINE_Y_METERS, frontLine)
+    drive.followLine(xOdomTarget, FieldConstants.LEFT_LINE_Y_METERS if line == LEFT else FieldConstants.RIGHT_LINE_Y_METERS, frontLine, headingRad=math.pi)
     if (abs(drive.odometry.xMeters - xOdomTarget) < RobotConstants.ODOM_TOLERANCE_METERS):
         drive.stop()
-        currentState = States.FACE_FORWARD
+        currentState = States.FIND_FRUIT
         previousState = States.FOLLOW_LINE_ODOMETRY
 
 def FACE_FORWARD():
@@ -569,8 +581,6 @@ def FIND_FRUIT(fromLine: TurnType.TurnType):
     if(abs(xEffort) > 0.1):
         xEffort = math.copysign(0.1, xEffort)
     
-    print(xError, xEffort)
-
     if (vision.hasFruit()):
         Kp = 0.001
         yError = 0 - vision.getXOffset()
@@ -580,9 +590,10 @@ def FIND_FRUIT(fromLine: TurnType.TurnType):
             drive.stop()
             currentState = States.PICK_FRUIT
             previousState = States.FIND_FRUIT
+            lift.setMidPosition()
     else:
         drive.applySpeedsCartesian(xEffort, (0.1 if fromLine == RIGHT else -0.1), drive.calcThetaControlRadPerSec(0), True)
-        if (frontLine.hasLine() and previousState != States.FOLLOW_LINE_ODOMETRY):
+        if (frontLine.hasLine() and previousState != States.FACE_FORWARD):
             drive.stop()
             currentState = States.FACE_FORWARD
             previousState = States.FIND_FRUIT
@@ -591,29 +602,19 @@ def FIND_FRUIT(fromLine: TurnType.TurnType):
 def PICK_FRUIT():
     global currentState
     global previousState
-    lift.setLowPosition()
-    if (lift.leftLift.position() >= 0.2):
+    if (lift.atPosition() and lift.target == lift.MID_POSITION):
         desiredX = FieldConstants.FIRST_ROW_X_METERS + RobotConstants.APPROACH_DISTANCE
         desiredY = drive.odometry.yMeters
-        desiredTheta = drive.odometry.thetaRad
+        desiredTheta = 0
         if (abs(desiredX - drive.odometry.xMeters) > 0.01):
             drive.driveToPosition(desiredX, desiredY, desiredTheta)
         else:
             drive.stop()
             lift.setStowPosition()
-            if (lift.leftLift.position() >= 0.025):
-                currentState = States.FIND_FRUIT
-                previousState = States.PICK_FRUIT
-
-
-
-
-drive.gyro.calibrate()
-while drive.gyro.is_calibrating():
-    pass
-print("GYRO CALIBRATED")
-drive.gyro.set_heading(0.0)
-
+    elif (lift.atPosition() and lift.target == lift.STOW_POSITION):
+        drive.stop()
+        currentState = States.FIND_FRUIT
+        previousState = States.PICK_FRUIT
 
 
 def robotPeriodic():
@@ -623,7 +624,7 @@ def robotPeriodic():
     gate.periodic()
     vision.periodic()
     frontLine.periodic()
-    print(currentState)
+    # print(currentState)
     if (currentState == States.FOLLOW_LINE_ODOMETRY):
         FOLLOW_LINE_ODOMETRY(RIGHT, FieldConstants.FIRST_ROW_X_METERS)
     if (currentState == States.FACE_FORWARD):
@@ -633,6 +634,6 @@ def robotPeriodic():
     if (currentState == States.PICK_FRUIT):
         PICK_FRUIT()
 
-    # print("x: " + str(drive.odometry.xMeters), "y: " + str(drive.odometry.yMeters), "theta: " + str(drive.odometry.thetaRad))
+    print("x: " + str(drive.odometry.xMeters), "y: " + str(drive.odometry.yMeters), "theta: " + str(drive.odometry.thetaRad))
     
 robotPeriodic()
