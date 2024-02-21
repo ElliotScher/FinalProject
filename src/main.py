@@ -21,14 +21,15 @@ class States:
     IDLE = 0
     INIT = 1
     FOLLOW_LINE_ODOMETRY = 2
-    FACE_DIRECTION = 3
+    FACE_FORWARD = 3
     FIND_FRUIT = 4
     PICK_FRUIT = 5
-    FOLLOW_LINE_ULTRASONIC = 6
-    FIND_BASKET = 7
-    DUMP_FRUIT = 8
-    FIND_LINE = 9
-    CHANGE_FRUIT = 10
+    FACE_BACKWARD = 6
+    FOLLOW_LINE_ULTRASONIC = 7
+    FIND_BASKET = 8
+    DUMP_FRUIT = 9
+    FIND_LINE = 10
+    CHANGE_FRUIT = 11
 
 class FRUIT_TYPE:
     LIME = Signature(3, -5513, -3161, -4337, -3823, -2027, -2925, 2.5, 0)
@@ -514,7 +515,7 @@ button = Bumper(DevicePorts.BUTTON)
 
 
 currentState = States.FOLLOW_LINE_ODOMETRY
-fruitPicked = 0
+previousState = States.INIT
 rowCount = 0
 
 def handleButton():
@@ -540,23 +541,28 @@ def INIT():
 
 def FOLLOW_LINE_ODOMETRY(line: TurnType.TurnType, xOdomTarget: float):
     global currentState
+    global previousState
     drive.followLine(xOdomTarget, FieldConstants.LEFT_LINE_Y_METERS if line == LEFT else FieldConstants.RIGHT_LINE_Y_METERS, frontLine)
     if (abs(drive.odometry.xMeters - xOdomTarget) < RobotConstants.ODOM_TOLERANCE_METERS):
         drive.stop()
-        currentState = States.FACE_DIRECTION
+        currentState = States.FACE_FORWARD
+        previousState = States.FOLLOW_LINE_ODOMETRY
 
-def FACE_DIRECTION(direction: DirectionType.DirectionType):
+def FACE_FORWARD():
     global currentState
-    target = 0 if direction == DirectionType.FORWARD else math.pi
+    global previousState
+    target = 0
     error = target - drive.odometry.thetaRad
     effort = error * RobotConstants.DRIVE_ROTATION_KP
     drive.applySpeeds(0, 0, effort, False)
     if (abs(error) < 0.1):
         drive.stop()
         currentState = States.FIND_FRUIT
+        previousState = States.FACE_FORWARD
 
 def FIND_FRUIT(fromLine: TurnType.TurnType):
     global currentState
+    global previousState
 
     xError = FieldConstants.FIRST_ROW_X_METERS - drive.odometry.xMeters
     xEffort = xError * RobotConstants.DRIVE_TRANSLATION_KP
@@ -573,13 +579,18 @@ def FIND_FRUIT(fromLine: TurnType.TurnType):
         if (abs(yError) < RobotConstants.FRUIT_CENTERING_TOLERANCE_PX):
             drive.stop()
             currentState = States.PICK_FRUIT
+            previousState = States.FIND_FRUIT
     else:
         drive.applySpeedsCartesian(xEffort, (0.1 if fromLine == RIGHT else -0.1), drive.calcThetaControlRadPerSec(0), True)
+        if (frontLine.hasLine() and previousState != States.FOLLOW_LINE_ODOMETRY):
+            drive.stop()
+            currentState = States.FACE_FORWARD
+            previousState = States.FIND_FRUIT
 
 
 def PICK_FRUIT():
     global currentState
-    global fruitPicked
+    global previousState
     lift.setLowPosition()
     if (lift.leftLift.position() >= 0.2):
         desiredX = FieldConstants.FIRST_ROW_X_METERS + RobotConstants.APPROACH_DISTANCE
@@ -591,8 +602,8 @@ def PICK_FRUIT():
             drive.stop()
             lift.setStowPosition()
             if (lift.leftLift.position() >= 0.025):
-                fruitPicked += 1
                 currentState = States.FIND_FRUIT
+                previousState = States.PICK_FRUIT
 
 
 
@@ -615,8 +626,8 @@ def robotPeriodic():
     print(currentState)
     if (currentState == States.FOLLOW_LINE_ODOMETRY):
         FOLLOW_LINE_ODOMETRY(RIGHT, FieldConstants.FIRST_ROW_X_METERS)
-    if (currentState == States.FACE_DIRECTION):
-        FACE_DIRECTION(FORWARD)
+    if (currentState == States.FACE_FORWARD):
+        FACE_FORWARD()
     if (currentState == States.FIND_FRUIT):
         FIND_FRUIT(RIGHT)
     if (currentState == States.PICK_FRUIT):
