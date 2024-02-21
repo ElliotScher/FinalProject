@@ -110,6 +110,8 @@ class Constants:
 
 
 
+
+
 class Odometry:
 
     def __init__(self, x = 0.0, y = 0.0, theta = 0.0):
@@ -149,9 +151,9 @@ class Odometry:
 
 
 
-        
 class LineSensorArray:
     __prevError = 0.0
+    __timer = Timer()
 
     def __init__(self, leftSensorPort: Triport.TriportPort, rightSensorPort: Triport.TriportPort):
         self.leftSensor = Line(leftSensorPort)
@@ -160,7 +162,7 @@ class LineSensorArray:
         self.periodic()
 
     def periodic(self):
-        timer.event(self.periodic, Constants.LOOP_PERIOD_MS)
+        self.__timer.event(self.periodic, Constants.LOOP_PERIOD_MS)
 
         if self.onLine():
             self.__lastSensorOnLine = None
@@ -169,7 +171,7 @@ class LineSensorArray:
         elif self.leftSensor.reflectivity() > Constants.LINE_REFLECTIVITY_THRESHOLD:
             self.__lastSensorOnLine = LEFT
 
-        self.__rate = (self.getError() - self.__prevError) / Constants.LOOP_PERIOD_MS
+        self.__rate = (self.getError() - self.__prevError) / (Constants.LOOP_PERIOD_MS / 1000)
         self.__prevError = self.getError()
 
     def hasLine(self):
@@ -195,31 +197,6 @@ class LineSensorArray:
 
 
 
-class Vision:
-    vision = Vision(DevicePorts.VISION, Constants.BRIGHTNESS, FRUIT_TYPE.LEMON, FRUIT_TYPE.LEMON, FRUIT_TYPE.TANGERINE)
-    currentSnapshot = None
-    previousSnapshot = None
-    currentFruit = None
-    def __init__(self) -> None:
-        self.periodic()
-
-    def periodic(self):
-        self.previousSnapshot = self.currentSnapshot
-        self.currentSnapshot = self.vision.take_snapshot(self.currentFruit)
-        timer.event(self.periodic, Constants.LOOP_PERIOD_MS)
-
-    def changeFruit(self, fruit: Signature):
-        self.currentFruit = fruit
-
-    def hasFruit(self):
-        return self.currentSnapshot
-
-    def getXOffset(self):
-        return (160 - self.vision.largest_object().centerX)
-
-    def getYOffset(self):
-        return self.vision.largest_object().centerY
-
 
 class Drive:
 
@@ -236,6 +213,8 @@ class Drive:
     gyro = Inertial(DevicePorts.GYRO)
 
     odometry = Odometry(0.0, 0.0, 0.0)
+
+    __timer = Timer()
 
     def __init__(self, heading = 0.0, calibrateGyro = False):
         if calibrateGyro:
@@ -262,9 +241,19 @@ class Drive:
     @staticmethod
     def __radPerSecToRPM(speedRadPerSec) -> float:
         return (speedRadPerSec * Constants.WHEEL_CIRCUMFERENCE_IN * 60) / (2 * math.pi * Constants.WHEEL_CIRCUMFERENCE_IN)
+    
+    def calcThetaControlRadPerSec(self, targetHeadingRad: float) -> float:
+        thetaError = targetHeadingRad - self.odometry.thetaRad
+
+        if thetaError > math.pi:
+            thetaError -= 2 * math.pi
+        elif thetaError < -math.pi:
+            thetaError += 2 * math.pi
+
+        return thetaError * Constants.DRIVE_ROTATION_KP
 
     def periodic(self):
-        timer.event(self.periodic, Constants.LOOP_PERIOD_MS)
+        self.__timer.event(self.periodic, Constants.LOOP_PERIOD_MS)
 
         self.odometry.update(
             self.getActualDirectionOfTravelRad(),
@@ -312,6 +301,11 @@ class Drive:
             rotationRPM + (xProjectionRPM + yProjectionRPM),
             rotationRPM + (xProjectionRPM - yProjectionRPM)
         )
+
+    def applySpeedsCartesian(self, xSpeedMetersPerSec: float, ySpeedMetersPerSec: float, rotationSpeedRadPerSec: float, fieldOriented = True):
+        direction = math.atan2(ySpeedMetersPerSec, xSpeedMetersPerSec)
+        magnitude = math.sqrt(xSpeedMetersPerSec ** 2 + ySpeedMetersPerSec ** 2)
+        self.applySpeeds(direction, magnitude, rotationSpeedRadPerSec, fieldOriented)
 
     def getActualDirectionOfTravelRad(self, fieldOriented = True) -> float:
         xFL = self.flDrive.velocity() * math.cos(7 * math.pi / 4)
@@ -386,36 +380,60 @@ class Drive:
         direction = math.atan2(yEffort, xEffort)
         magnitude = math.sqrt(xError**2 + yError**2)
 
-        thetaError = headingRad - self.odometry.thetaRad
-
-        if thetaError > math.pi:
-            thetaError -= 2 * math.pi
-        elif thetaError < -math.pi:
-            thetaError += 2 * math.pi
-
-        thetaEffort = thetaError * Constants.DRIVE_ROTATION_KP
-
-        if(abs(magnitude) > Constants.DRIVE_MAX_SPEED_METERS_PER_SEC):
+        if abs(magnitude) > Constants.DRIVE_MAX_SPEED_METERS_PER_SEC:
             magnitude = math.copysign(Constants.DRIVE_MAX_SPEED_METERS_PER_SEC, magnitude)
 
-        self.applySpeeds(direction, magnitude, thetaEffort, True)
+        self.applySpeeds(direction, magnitude, self.calcThetaControlRadPerSec(headingRad), True)
 
-    def followLine(self, odomXMetersTarget: float, odomLineYMeters: float, speedMetersPerSec: float, lineSensorArray: LineSensorArray, findLineIfOff = True):
+    def followLine(self, odomXMetersTarget: float, odomLineYMeters: float, lineSensorArray: LineSensorArray, headingRad = 0.0, findLineIfOff = True):
+        driveEffort = (odomXMetersTarget - self.odometry.xMeters) * Constants.DRIVE_TRANSLATION_KP
+        if abs(driveEffort) > Constants.DRIVE_FOLLOW_LINE_SPEED_METERS_PER_SEC:
+            driveEffort = math.copysign(Constants.DRIVE_FOLLOW_LINE_SPEED_METERS_PER_SEC, driveEffort)
+        
         if lineSensorArray.hasLine():
             self.odometry.yMeters = odomLineYMeters
 
-            driveEffort = (odomXMetersTarget - self.odometry.xMeters) * Constants.DRIVE_TRANSLATION_KP
-            if(abs(driveEffort) < speedMetersPerSec):
-                driveEffort = math.copysign(speedMetersPerSec, driveEffort)
+            strafeEffort = lineSensorArray.getError() * Constants.FOLLOW_LINE_KP + lineSensorArray.getRate() * Constants.FOLLOW_LINE_KD
 
-            rotEffort = lineSensorArray.getError() * Constants.FOLLOW_LINE_KP + lineSensorArray.getRate() * Constants.FOLLOW_LINE_KD
-
-            self.applySpeeds(0, driveEffort, rotEffort, False)
+            self.applySpeedsCartesian(driveEffort, strafeEffort, self.calcThetaControlRadPerSec(headingRad), True)
         elif findLineIfOff:
             if lineSensorArray.getLastSensorOnLine() == RIGHT:
-                self.applySpeeds(0, Constants.DRIVE_FIND_LINE_SPEED_METERS_PER_SEC, 0, True)
+                self.applySpeedsCartesian(driveEffort, -Constants.DRIVE_FIND_LINE_SPEED_METERS_PER_SEC, self.calcThetaControlRadPerSec(headingRad), True)
             elif lineSensorArray.getLastSensorOnLine() == LEFT:
-                self.applySpeeds(0, -Constants.DRIVE_FIND_LINE_SPEED_METERS_PER_SEC, 0, True)
+                self.applySpeedsCartesian(driveEffort, Constants.DRIVE_FIND_LINE_SPEED_METERS_PER_SEC, self.calcThetaControlRadPerSec(headingRad), True)
+            else:
+                self.stop()
+
+
+
+
+
+class Vision:
+    vision = Vision(DevicePorts.VISION, Constants.BRIGHTNESS, FRUIT_TYPE.LEMON, FRUIT_TYPE.LEMON, FRUIT_TYPE.TANGERINE)
+    currentSnapshot = None
+    previousSnapshot = None
+    currentFruit = None
+    def __init__(self) -> None:
+        self.periodic()
+
+    def periodic(self):
+        self.previousSnapshot = self.currentSnapshot
+        self.currentSnapshot = self.vision.take_snapshot(self.currentFruit)
+        timer.event(self.periodic, Constants.LOOP_PERIOD_MS)
+
+    def changeFruit(self, fruit: Signature):
+        self.currentFruit = fruit
+
+    def hasFruit(self):
+        return self.currentSnapshot
+
+    def getXOffset(self):
+        return (160 - self.vision.largest_object().centerX)
+
+    def getYOffset(self):
+        return self.vision.largest_object().centerY
+
+
 
 
 
@@ -552,11 +570,10 @@ def INIT():
     global currentState
     # init things here
 
-def FOLLOW_LINE_ODOMETRY(line: TurnType.TurnType, odom_x_target: float):
+def FOLLOW_LINE_ODOMETRY(line: TurnType.TurnType, xOdomTarget: float):
     global currentState
-    drive.odometry.yMeters = Constants.LEFT_LINE_Y_METERS if line == LEFT else Constants.RIGTH_LINE_Y_METERS
-    drive.followLine(odom_x_target, drive.odometry.yMeters, 0.2, frontLine, True)
-    if (abs(drive.odometry.xMeters - odom_x_target) < Constants.ODOM_TOLERANCE_METERS):
+    drive.followLine(xOdomTarget, Constants.LEFT_LINE_Y_METERS if line == LEFT else Constants.RIGTH_LINE_Y_METERS, frontLine, True)
+    if (abs(drive.odometry.xMeters - xOdomTarget) < Constants.ODOM_TOLERANCE_METERS):
         drive.stop()
         currentState = States.FACE_DIRECTION
 
