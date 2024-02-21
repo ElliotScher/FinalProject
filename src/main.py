@@ -102,7 +102,7 @@ class RobotConstants:
 
         BRIGHTNESS = 41
 
-        FRUIT_CENTERING_TOLERANCE = 15 #px
+        FRUIT_CENTERING_TOLERANCE_PX = 15 #px
 
         APPROACH_DISTANCE = 0.25
 
@@ -547,10 +547,9 @@ def FOLLOW_LINE_ODOMETRY(line: TurnType.TurnType, xOdomTarget: float):
 
 def FACE_DIRECTION(direction: DirectionType.DirectionType):
     global currentState
-    Kp = 1
     target = 0 if direction == DirectionType.FORWARD else math.pi
     error = target - drive.odometry.thetaRad
-    effort = error * Kp
+    effort = error * RobotConstants.DRIVE_ROTATION_KP
     drive.applySpeeds(0, 0, effort, False)
     if (abs(error) < 0.1):
         drive.stop()
@@ -558,22 +557,24 @@ def FACE_DIRECTION(direction: DirectionType.DirectionType):
 
 def FIND_FRUIT(fromLine: TurnType.TurnType):
     global currentState
+
     xError = FieldConstants.FIRST_ROW_X_METERS - drive.odometry.xMeters
-    print(xError)
     xEffort = xError * RobotConstants.DRIVE_TRANSLATION_KP
     if(abs(xEffort) > 0.1):
         xEffort = math.copysign(0.1, xEffort)
+    
+    print(xError, xEffort)
+
     if (vision.hasFruit()):
         Kp = 0.001
         yError = 0 - vision.getXOffset()
         yEffort = yError * Kp
         drive.applySpeedsCartesian(xEffort, yEffort, drive.calcThetaControlRadPerSec(0), True)
-        if (abs(yError) < RobotConstants.FRUIT_CENTERING_TOLERANCE):
+        if (abs(yError) < RobotConstants.FRUIT_CENTERING_TOLERANCE_PX):
             drive.stop()
             currentState = States.PICK_FRUIT
-
     else:
-        drive.applySpeedsCartesian(xEffort, 0.1 if fromLine == RIGHT else -0.1, drive.calcThetaControlRadPerSec(0), True)
+        drive.applySpeedsCartesian(xEffort, (0.1 if fromLine == RIGHT else -0.1), drive.calcThetaControlRadPerSec(0), True)
 
 
 def PICK_FRUIT():
