@@ -407,6 +407,12 @@ class Drive:
             else:
                 self.stop()
 
+    def wiggle(self):
+        if (self.gyro.heading() < 0):
+            self.applySpeeds(0, 0, math.pi, True)
+        else:
+            self.applySpeeds(0, 0, -math.pi, True)
+
 
 
 
@@ -549,9 +555,13 @@ def FOLLOW_LINE_ODOMETRY(line: TurnType.TurnType, xOdomTarget: float):
     global currentState
     global previousState
     drive.followLine(xOdomTarget, FieldConstants.LEFT_LINE_Y_METERS if line == LEFT else FieldConstants.RIGHT_LINE_Y_METERS, frontLine)
-    if (abs(drive.odometry.xMeters - xOdomTarget) < RobotConstants.ODOM_TOLERANCE_METERS):
+    if (abs(drive.odometry.xMeters - xOdomTarget) < RobotConstants.ODOM_TOLERANCE_METERS and line == RIGHT):
         drive.stop()
-        currentState = States.FIND_FRUIT
+        currentState = States.FACE_FORWARD
+        previousState = States.FOLLOW_LINE_ODOMETRY
+    if (abs(drive.odometry.xMeters - xOdomTarget) < RobotConstants.ODOM_TOLERANCE_METERS and line == LEFT):
+        drive.stop()
+        currentState = States.FIND_BASKET
         previousState = States.FOLLOW_LINE_ODOMETRY
 
 def FACE_FORWARD():
@@ -561,9 +571,13 @@ def FACE_FORWARD():
     error = target - drive.odometry.thetaRad
     effort = error * RobotConstants.DRIVE_ROTATION_KP
     drive.applySpeeds(0, 0, effort, False)
-    if (abs(error) < 0.1):
+    if (abs(error) < 0.1 and previousState != States.FIND_FRUIT):
         drive.stop()
         currentState = States.FIND_FRUIT
+        previousState = States.FACE_FORWARD
+    if (abs(error) < 0.1 and previousState == States.FIND_FRUIT):
+        drive.stop()
+        currentState = States.FOLLOW_LINE_ODOMETRY
         previousState = States.FACE_FORWARD
 
 def FIND_FRUIT(fromLine: TurnType.TurnType):
@@ -575,7 +589,7 @@ def FIND_FRUIT(fromLine: TurnType.TurnType):
     if(abs(xEffort) > 0.1):
         xEffort = math.copysign(0.1, xEffort)
     
-    if (vision.hasFruit()):
+    if (vision.hasFruit() and previousState):
         Kp = 0.001
         yError = -vision.getXOffset()
         yEffort = yError * Kp
@@ -584,7 +598,7 @@ def FIND_FRUIT(fromLine: TurnType.TurnType):
             drive.stop()
             currentState = States.PICK_FRUIT
             previousState = States.FIND_FRUIT
-            lift.setLowPosition()
+            lift.setMidPosition()
     else:
         drive.applySpeedsCartesian(xEffort, (0.1 if fromLine == RIGHT else -0.1), drive.calcThetaControlRadPerSec(0), True)
         if (frontLine.hasLine() and previousState != States.FACE_FORWARD):
@@ -598,7 +612,7 @@ def PICK_FRUIT():
     global previousState
     desiredY = drive.odometry.yMeters
     desiredTheta = 0
-    if lift.atTarget() and lift.target == lift.LOW_POSITION:
+    if lift.atTarget() and lift.target == lift.MID_POSITION:
         desiredX = FieldConstants.FIRST_ROW_X_METERS + RobotConstants.FRUIT_APPROACH_DISTANCE_METERS
         if (abs(desiredX - drive.odometry.xMeters) > 0.01):
             drive.driveToPosition(desiredX, desiredY, desiredTheta)
@@ -617,6 +631,24 @@ def PICK_FRUIT():
         drive.stop()
 
 
+def FIND_BASKET(fruit: Signature):
+    global currentState
+    global previousState
+
+    if fruit == FRUIT_TYPE.LEMON:
+        if (abs(drive.odometry.xMeters - 0.3) < 0.05 and abs(drive.odometry.yMeters - 1.25) < 0.05):
+            drive.stop()
+            currentState = States.DUMP_FRUIT
+            previousState = States.FIND_BASKET
+        drive.driveToPosition(0.3, 1.25, 0)
+    
+def DUMP_FRUIT():
+    drive.stop()
+    if (gate.leftGate.position() != gate.UNLOCKED_POSITION):
+        gate.setUnlockedPosition()
+    else:
+        gate.setLockedPosition()
+
 def robotPeriodic():
     timer.event(robotPeriodic, RobotConstants.LOOP_PERIOD_MS)
     drive.periodic()
@@ -625,7 +657,7 @@ def robotPeriodic():
     vision.periodic()
     frontLine.periodic()
     # print(currentState)
-    if (currentState == States.FOLLOW_LINE_ODOMETRY):
+    if (currentState == States.FOLLOW_LINE_ODOMETRY and previousState != States.FACE_FORWARD):
         FOLLOW_LINE_ODOMETRY(RIGHT, FieldConstants.FIRST_ROW_X_METERS)
     if (currentState == States.FACE_FORWARD):
         FACE_FORWARD()
@@ -633,7 +665,18 @@ def robotPeriodic():
         FIND_FRUIT(RIGHT)
     if (currentState == States.PICK_FRUIT):
         PICK_FRUIT()
+    if (currentState == States.FOLLOW_LINE_ODOMETRY and previousState == States.FACE_FORWARD):
+        FOLLOW_LINE_ODOMETRY(LEFT, 0.6)
+    if (currentState == States.FIND_BASKET):
+        FIND_BASKET(FRUIT_TYPE.LEMON)
+    if (currentState == States.DUMP_FRUIT):
+        DUMP_FRUIT()
 
     # print("x: " + str(drive.odometry.xMeters), "y: " + str(drive.odometry.yMeters), "theta: " + str(drive.odometry.thetaRad))
     
+
+
+drive.gyro.calibrate()
+while (drive.gyro.is_calibrating()):
+    pass
 robotPeriodic()
