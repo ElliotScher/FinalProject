@@ -84,28 +84,28 @@ class RobotConstants:
         DRIVE_FIND_LINE_SPEED_METERS_PER_SEC = 0.2
 
         DRIVE_FOLLOW_LINE_SPEED_METERS_PER_SEC = 0.2
-        ODOM_TOLERANCE_METERS = 0.0025
+        ODOM_TOLERANCE_METERS = 0.01
 
         ODOM_X_POSITIVE_DRIFT = 194 / 200
-        ODOM_X_NEGATIVE_DRIFT = 207 / 200
+        ODOM_X_NEGATIVE_DRIFT = 220 / 200
         ODOM_Y_POSITIVE_DRIFT = 180 / 200
         ODOM_Y_NEGATIVE_DRIFT = 211 / 200
 
-        ODOM_Y_DRIFT_PER_POSITIVE_X_TRANSLATION = 5 / 200
+        ODOM_Y_DRIFT_PER_POSITIVE_X_TRANSLATION = -10 / 200
         ODOM_Y_DRIFT_PER_NEGATIVE_X_TRANSLATION = -17 / 200
 
-        LINE_REFLECTIVITY_THRESHOLD = 0.5
+        LINE_REFLECTIVITY_THRESHOLD = 25
 
-        FOLLOW_LINE_KP = 0
-        FOLLOW_LINE_KD = 0
+        FOLLOW_LINE_KP = 0.001
+        FOLLOW_LINE_KD = 0.00003
 
         LIFT_SPEED = 150
 
         BRIGHTNESS = 41
 
-        FRUIT_CENTERING_TOLERANCE_PX = 15 #px
+        FRUIT_CENTERING_TOLERANCE_PX = 15
 
-        APPROACH_DISTANCE = 0.25
+        FRUIT_APPROACH_DISTANCE_METERS = 0.25
 
 
 
@@ -212,7 +212,9 @@ class Drive:
 
     gyro = Inertial(DevicePorts.GYRO)
 
-    odometry = Odometry(0.15875, FieldConstants.RIGHT_LINE_Y_METERS, 0.0)
+    odometry = Odometry(0.0, 0.0, 0.0)
+
+    __timer = Timer()
 
     def __init__(self, heading = 0.0, calibrateGyro = False):
         if calibrateGyro:
@@ -222,6 +224,7 @@ class Drive:
             print("GYRO CALIBRATED")
             self.gyro.set_heading(heading)
         
+        self.periodic()
 
     @staticmethod
     def __revolutionsToMeters(revolutions) -> float:
@@ -250,6 +253,8 @@ class Drive:
         return thetaError * RobotConstants.DRIVE_ROTATION_KP
 
     def periodic(self):
+        self.__timer.event(self.periodic, RobotConstants.LOOP_PERIOD_MS)
+
         self.odometry.update(
             self.getActualDirectionOfTravelRad(),
             self.getDistanceTraveledMeters(),
@@ -378,9 +383,7 @@ class Drive:
         if abs(magnitude) > RobotConstants.DRIVE_MAX_SPEED_METERS_PER_SEC:
             magnitude = math.copysign(RobotConstants.DRIVE_MAX_SPEED_METERS_PER_SEC, magnitude)
 
-        
         self.applySpeeds(direction, magnitude, self.calcThetaControlRadPerSec(headingRad), True)
-
 
     def followLine(self, odomXMetersTarget: float, odomLineYMeters: float, lineSensorArray: LineSensorArray, headingRad = 0.0, findLineIfOff = True):
         driveEffort = (odomXMetersTarget - self.odometry.xMeters) * RobotConstants.DRIVE_TRANSLATION_KP
@@ -573,7 +576,7 @@ def FIND_FRUIT(fromLine: TurnType.TurnType):
 
     if (vision.hasFruit()):
         Kp = 0.001
-        yError = 0 - vision.getXOffset()
+        yError = -vision.getXOffset()
         yEffort = yError * Kp
         drive.applySpeedsCartesian(xEffort, yEffort, drive.calcThetaControlRadPerSec(0), True)
         if (abs(yError) < RobotConstants.FRUIT_CENTERING_TOLERANCE_PX):
@@ -593,7 +596,7 @@ def PICK_FRUIT():
     global previousState
     lift.setLowPosition()
     if (lift.leftLift.position() >= 0.2):
-        desiredX = FieldConstants.FIRST_ROW_X_METERS + RobotConstants.APPROACH_DISTANCE
+        desiredX = FieldConstants.FIRST_ROW_X_METERS + RobotConstants.FRUIT_APPROACH_DISTANCE_METERS
         desiredY = drive.odometry.yMeters
         desiredTheta = drive.odometry.thetaRad
         if (abs(desiredX - drive.odometry.xMeters) > 0.01):
