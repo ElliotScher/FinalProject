@@ -21,15 +21,41 @@ class States:
     IDLE = 0
     INIT = 1
     FOLLOW_LINE_ODOMETRY = 2
-    FACE_FORWARD = 3
+    FACE_DIRECTION = 3
     FIND_FRUIT = 4
     PICK_FRUIT = 5
-    FACE_BACKWARD = 6
-    FOLLOW_LINE_ULTRASONIC = 7
-    FIND_BASKET = 8
-    DUMP_FRUIT = 9
-    FIND_LINE = 10
-    CHANGE_FRUIT = 11
+    FOLLOW_LINE_SONAR = 6
+    FIND_BASKET = 7
+    DUMP_FRUIT = 8
+    FIND_LINE = 9
+
+    @staticmethod
+    def toString(state: int) -> str:
+        if state == States.IDLE:
+            return "IDLE"
+        elif state == States.INIT:
+            return "INIT"
+        elif state == States.FOLLOW_LINE_ODOMETRY:
+            return "FOLLOW_LINE_ODOOMETRY"
+        elif state == States.FACE_DIRECTION:
+            return "FACE_DIRECTION"
+        elif state == States.FIND_FRUIT:
+            return "FIND_FRUIT"
+        elif state == States.PICK_FRUIT:
+            return "PICK_FRUIT"
+        elif state == States.FOLLOW_LINE_SONAR:
+            return "FOLLOW_LINE_SONAR"
+        elif state == States.FIND_BASKET:
+            return "FIND_BASKET"
+        elif state == States.FIND_LINE:
+            return "FIND_LINE"
+        else:
+            return ":("
+        
+    @staticmethod
+    def printTransition():
+        print(States.toString(previousState), "->", States.toString(currentState))
+        
 
 class FRUIT_TYPE:
     LIME = Signature(3, -5513, -3161, -4337, -3823, -2027, -2925, 2.5, 0)
@@ -50,23 +76,28 @@ class DevicePorts:
 
     GATE = Ports.PORT6
 
-    ULTRASONIC = brain.three_wire_port.a
     VISION = Ports.PORT1
 
-    FL_LINE = brain.three_wire_port.g
+    FL_LINE = brain.three_wire_port.f
     FR_LINE = brain.three_wire_port.b
 
-    BUTTON = brain.three_wire_port.d
+    DRIVE_SONAR = brain.three_wire_port.g
+
+    LIFT_SONAR = brain.three_wire_port.c
+
+    BUTTON = brain.three_wire_port.a
 
 class RobotConstants:
         
-        LOOP_PERIOD_MS = 20
+        LOOP_PERIOD_MSEC = 20
         
         WHEEL_DIAMETER_IN = 4
         WHEEL_CIRCUMFERENCE_IN = WHEEL_DIAMETER_IN * math.pi
 
         DRIVE_BASE_RADIUS_IN = 7.75
         DRIVE_BASE_CIRCUMFERENCE_IN = DRIVE_BASE_RADIUS_IN * 2 * math.pi
+
+        DRIVE_BASE_WIDTH_METERS = 0.3175
 
         MOTOR_MAX_SPEED_RPM = 200
 
@@ -75,7 +106,7 @@ class RobotConstants:
 
         DRIVE_TRAIN_IDLE_MODE = BRAKE
 
-        DRIVE_TRANSLATION_KP = 1.5
+        DRIVE_TRANSLATION_KP = 2.0
 
         DRIVE_ROTATION_KP = 7.5
 
@@ -95,7 +126,7 @@ class RobotConstants:
         ODOM_Y_DRIFT_PER_POSITIVE_X_TRANSLATION = -10 / 200
         ODOM_Y_DRIFT_PER_NEGATIVE_X_TRANSLATION = -17 / 200
 
-        LINE_REFLECTIVITY_THRESHOLD = 25
+        LINE_REFLECTIVITY_THRESHOLD = 15
 
         FOLLOW_LINE_KP = 0.001
         FOLLOW_LINE_KD = 0.00003
@@ -104,17 +135,25 @@ class RobotConstants:
 
         VISION_BRIGHTNESS = 41
 
-        FRUIT_CENTERING_TOLERANCE_PX = 15
+        FRUIT_CENTERING_TOLERANCE_PX = 10
 
-        FRUIT_APPROACH_DISTANCE_METERS = 0.1
+        FRUIT_APPROACH_DISTANCE_METERS = 0.15
 
+        DUMP_TIME_MSEC = 3000
 
 
 class FieldConstants:
     LEFT_LINE_Y_METERS = 2.205
     RIGHT_LINE_Y_METERS = 0.28
 
-    FIRST_ROW_X_METERS = 0.6
+    FIRST_ROW_X_METERS = 0.65
+
+    DISTANCE_TO_BASKET_WALL_METERS = 0.45
+
+    LIME_BASKET_Y_METERS = 0.71
+    LEMON_BASKET_Y_METERS = 1.3
+    TANGERINE_BASKET_Y_METERS = 1.81
+
 
 
 class Odometry:
@@ -172,7 +211,7 @@ class LineSensorArray:
         elif self.leftSensor.reflectivity() > RobotConstants.LINE_REFLECTIVITY_THRESHOLD:
             self.__lastSensorOnLine = LEFT
 
-        self.__rate = (self.getError() - self.__prevError) / (RobotConstants.LOOP_PERIOD_MS / 1000)
+        self.__rate = (self.getError() - self.__prevError) / (RobotConstants.LOOP_PERIOD_MSEC / 1000)
         self.__prevError = self.getError()
 
     def hasLine(self):
@@ -213,21 +252,21 @@ class Drive:
 
     gyro = Inertial(DevicePorts.GYRO)
 
+    sonar = Sonar(DevicePorts.DRIVE_SONAR)
+
     odometry = Odometry(0.0, 0.0, 0.0)
 
-    __timer = Timer()
+    def __init__(self):        
+        self.gyroCalibrated = False
 
-    def __init__(self, heading = 0.0, calibrateGyro = False):
-        if calibrateGyro:
+    def calibrateGyro(self, heading = 0.0):
+        if not self.gyro.is_calibrating():
             self.gyro.calibrate()
-            while self.gyro.is_calibrating():
-                pass
-            print("GYRO CALIBRATED")
+        else:
+            self.gyroCalibrated = True
         
         self.gyro.set_heading(heading)
         self.odometry.thetaRad = heading
-        
-        self.periodic()
 
     @staticmethod
     def __revolutionsToMeters(revolutions) -> float:
@@ -245,6 +284,9 @@ class Drive:
     def __radPerSecToRPM(speedRadPerSec) -> float:
         return (speedRadPerSec * RobotConstants.WHEEL_CIRCUMFERENCE_IN * 60) / (2 * math.pi * RobotConstants.WHEEL_CIRCUMFERENCE_IN)
     
+    def getSonarDistanceMeters(self) -> float:
+        return self.sonar.distance(DistanceUnits.CM) / 100
+
     def calcThetaControlRadPerSec(self, targetHeadingRad: float) -> float:
         thetaError = targetHeadingRad - self.odometry.thetaRad
 
@@ -256,8 +298,6 @@ class Drive:
         return -thetaError * RobotConstants.DRIVE_ROTATION_KP
 
     def periodic(self):
-        self.__timer.event(self.periodic, RobotConstants.LOOP_PERIOD_MS)
-
         self.odometry.update(
             self.getActualDirectionOfTravelRad(),
             self.getDistanceTraveledMeters(),
@@ -388,8 +428,27 @@ class Drive:
 
         self.applySpeeds(direction, magnitude, self.calcThetaControlRadPerSec(headingRad), True)
 
-    def followLine(self, odomXMetersTarget: float, odomLineYMeters: float, lineSensorArray: LineSensorArray, headingRad = 0.0, findLineIfOff = True):
+    def followLineToOdom(self, odomXMetersTarget: float, odomLineYMeters: float, lineSensorArray: LineSensorArray, headingRad = 0.0, findLineIfOff = True):
         driveEffort = (odomXMetersTarget - self.odometry.xMeters) * RobotConstants.DRIVE_TRANSLATION_KP
+        if abs(driveEffort) > RobotConstants.DRIVE_FOLLOW_LINE_SPEED_METERS_PER_SEC:
+            driveEffort = math.copysign(RobotConstants.DRIVE_FOLLOW_LINE_SPEED_METERS_PER_SEC, driveEffort)
+        
+        if lineSensorArray.hasLine():
+            self.odometry.yMeters = odomLineYMeters
+
+            strafeEffort = lineSensorArray.getError() * RobotConstants.FOLLOW_LINE_KP + lineSensorArray.getRate() * RobotConstants.FOLLOW_LINE_KD
+
+            self.applySpeedsCartesian(driveEffort, strafeEffort, self.calcThetaControlRadPerSec(headingRad), True)
+        elif findLineIfOff:
+            if lineSensorArray.getLastSensorOnLine() == RIGHT:
+                self.applySpeedsCartesian(driveEffort, -RobotConstants.DRIVE_FIND_LINE_SPEED_METERS_PER_SEC, self.calcThetaControlRadPerSec(headingRad), True)
+            elif lineSensorArray.getLastSensorOnLine() == LEFT:
+                self.applySpeedsCartesian(driveEffort, RobotConstants.DRIVE_FIND_LINE_SPEED_METERS_PER_SEC, self.calcThetaControlRadPerSec(headingRad), True)
+            else:
+                self.stop()
+
+    def followLineToSonar(self, sonarTargetMeters: float, odomLineYMeters: float, lineSensorArray: LineSensorArray, headingRad = 0.0, findLineIfOff = True):
+        driveEffort = (sonarTargetMeters - self.getSonarDistanceMeters()) * RobotConstants.DRIVE_TRANSLATION_KP
         if abs(driveEffort) > RobotConstants.DRIVE_FOLLOW_LINE_SPEED_METERS_PER_SEC:
             driveEffort = math.copysign(RobotConstants.DRIVE_FOLLOW_LINE_SPEED_METERS_PER_SEC, driveEffort)
         
@@ -441,7 +500,7 @@ class Lift:
     leftLift = Motor(DevicePorts.LEFT_LIFT, False)
     rightLift = Motor(DevicePorts.RIGHT_LIFT, True)
 
-    ultrasonic = Sonar(DevicePorts.ULTRASONIC)
+    sonar = Sonar(DevicePorts.LIFT_SONAR)
 
     LOW_DISTANCE = 0.0
     MID_DISTANCE = 0.0
@@ -476,11 +535,11 @@ class Lift:
         self.target = self.HIGH_POSITION
 
     def setUltrasonicPosition(self):
-        if (abs(self.ultrasonic.distance(INCHES) - self.LOW_POSITION) < 0.01):
+        if (abs(self.sonar.distance(INCHES) - self.LOW_POSITION) < 0.01):
             self.setLowPosition()
-        if (abs(self.ultrasonic.distance(INCHES) - self.MID_POSITION) < 0.01):
+        if (abs(self.sonar.distance(INCHES) - self.MID_POSITION) < 0.01):
             self.setMidPosition()
-        if (abs(self.ultrasonic.distance(INCHES) - self.HIGH_POSITION) < 0.01):
+        if (abs(self.sonar.distance(INCHES) - self.HIGH_POSITION) < 0.01):
             self.setHighPosition()
 
     def stop(self):
@@ -505,10 +564,10 @@ class Gate:
         pass
 
     def setLockedPosition(self):
-        self.leftGate.spin_to_position(self.LOCKED_POSITION, DEGREES)
+        self.leftGate.spin_to_position(self.LOCKED_POSITION, DEGREES, False)
 
     def setUnlockedPosition(self):
-        self.leftGate.spin_to_position(self.UNLOCKED_POSITION, DEGREES)
+        self.leftGate.spin_to_position(self.UNLOCKED_POSITION, DEGREES, False)
 
 
 drive = Drive()
@@ -520,55 +579,55 @@ frontLine = LineSensorArray(DevicePorts.FL_LINE, DevicePorts.FR_LINE)
 button = Bumper(DevicePorts.BUTTON)
 
 
-currentState = States.FOLLOW_LINE_ODOMETRY
-previousState = States.INIT
+currentState = States.IDLE
+previousState = States.IDLE
 rowCount = 0
 
-def handleButton():
-    global currentState
-    if currentState == States.IDLE:
-        currentState = States.INIT
-        sleep(500)
-    elif currentState == States.INIT:
-        currentState = States.FOLLOW_LINE_ODOMETRY
-        sleep(500)
-    else:
-        currentState = States.INIT
-        sleep(500)
-
 def IDLE():
-    global currentState
     drive.stop()
     lift.stop()
 
 def INIT():
-    global currentState
-    # init things here
+    vision.changeFruit(FRUIT_TYPE.LIME)
+    gate.setLockedPosition()
+    if not drive.gyroCalibrated:
+        drive.calibrateGyro()
+    drive.odometry.xMeters = RobotConstants.DRIVE_BASE_WIDTH_METERS / 2
+    if drive.gyro.is_calibrating():
+        print("GYRO CALIBRATING")
+    else:
+        print("GYRO CALIBRATED")
+
 
 def FOLLOW_LINE_ODOMETRY(line: TurnType.TurnType, xOdomTarget: float):
-    global currentState
-    global previousState
-    drive.followLine(xOdomTarget, FieldConstants.LEFT_LINE_Y_METERS if line == LEFT else FieldConstants.RIGHT_LINE_Y_METERS, frontLine)
+    global currentState, previousState
+
+    drive.followLineToOdom(xOdomTarget, FieldConstants.LEFT_LINE_Y_METERS if line == LEFT else FieldConstants.RIGHT_LINE_Y_METERS, frontLine)
     if (abs(drive.odometry.xMeters - xOdomTarget) < RobotConstants.ODOM_TOLERANCE_METERS):
         drive.stop()
-        currentState = States.FIND_FRUIT
+        currentState = States.FACE_DIRECTION
         previousState = States.FOLLOW_LINE_ODOMETRY
+        States.printTransition()
 
-def FACE_FORWARD():
-    global currentState
-    global previousState
+def FACE_DIRECTION():
+    global currentState, previousState
+
     target = 0
     error = target - drive.odometry.thetaRad
     effort = error * RobotConstants.DRIVE_ROTATION_KP
     drive.applySpeeds(0, 0, effort, False)
     if (abs(error) < 0.1):
         drive.stop()
-        currentState = States.FIND_FRUIT
-        previousState = States.FACE_FORWARD
+        if previousState == States.FOLLOW_LINE_ODOMETRY:
+            currentState = States.FIND_FRUIT
+            previousState = States.FACE_DIRECTION
+        elif previousState == States.FIND_FRUIT:
+            currentState = States.FOLLOW_LINE_SONAR
+            previousState = States.FACE_DIRECTION
+        States.printTransition()
 
 def FIND_FRUIT(fromLine: TurnType.TurnType):
-    global currentState
-    global previousState
+    global currentState, previousState
 
     xError = FieldConstants.FIRST_ROW_X_METERS - drive.odometry.xMeters
     xEffort = xError * RobotConstants.DRIVE_TRANSLATION_KP
@@ -584,21 +643,23 @@ def FIND_FRUIT(fromLine: TurnType.TurnType):
             drive.stop()
             currentState = States.PICK_FRUIT
             previousState = States.FIND_FRUIT
-            lift.setLowPosition()
+            States.printTransition()
+            lift.setMidPosition()
     else:
         drive.applySpeedsCartesian(xEffort, (0.1 if fromLine == RIGHT else -0.1), drive.calcThetaControlRadPerSec(0), True)
-        if (frontLine.hasLine() and previousState != States.FACE_FORWARD):
+        if (frontLine.hasLine() and previousState != States.FACE_DIRECTION):
             drive.stop()
-            currentState = States.FACE_FORWARD
+            currentState = States.FACE_DIRECTION
             previousState = States.FIND_FRUIT
+            States.printTransition()
 
 
 def PICK_FRUIT():
-    global currentState
-    global previousState
+    global currentState, previousState
+
     desiredY = drive.odometry.yMeters
     desiredTheta = 0
-    if lift.atTarget() and lift.target == lift.LOW_POSITION:
+    if lift.atTarget() and lift.target == lift.MID_POSITION:
         desiredX = FieldConstants.FIRST_ROW_X_METERS + RobotConstants.FRUIT_APPROACH_DISTANCE_METERS
         if (abs(desiredX - drive.odometry.xMeters) > 0.01):
             drive.driveToPosition(desiredX, desiredY, desiredTheta)
@@ -613,27 +674,103 @@ def PICK_FRUIT():
             drive.stop()
             currentState = States.FIND_FRUIT
             previousState = States.PICK_FRUIT
+            States.printTransition()
     else:
         drive.stop()
 
+def FOLLOW_LINE_SONAR(line: TurnType.TurnType, sonarTargetMeters: float):
+    global currentState, previousState
+    drive.followLineToSonar(sonarTargetMeters, FieldConstants.LEFT_LINE_Y_METERS if line == LEFT else FieldConstants.RIGHT_LINE_Y_METERS, frontLine)
+    if (abs(drive.getSonarDistanceMeters() - sonarTargetMeters) < RobotConstants.ODOM_TOLERANCE_METERS):
+        drive.stop()
+        drive.odometry.xMeters = drive.getSonarDistanceMeters() + (RobotConstants.DRIVE_BASE_WIDTH_METERS / 2)
+        currentState = States.FIND_BASKET
+        previousState = States.FOLLOW_LINE_SONAR
+        States.printTransition()
+
+def FIND_BASKET(fruit: Signature):
+    global currentState, previousState
+
+    yTargetMeters = 0
+    if fruit == FRUIT_TYPE.LIME:
+        yTargetMeters = FieldConstants.LIME_BASKET_Y_METERS
+    elif fruit == FRUIT_TYPE.LEMON:
+        yTargetMeters = FieldConstants.LEMON_BASKET_Y_METERS
+    elif fruit == FRUIT_TYPE.TANGERINE:
+        yTargetMeters = FieldConstants.TANGERINE_BASKET_Y_METERS
+    
+    drive.driveToPosition(FieldConstants.DISTANCE_TO_BASKET_WALL_METERS + (RobotConstants.DRIVE_BASE_WIDTH_METERS / 2), yTargetMeters, 0)
+
+    if(abs(drive.odometry.yMeters - yTargetMeters) < 0.05):
+        drive.stop()
+        currentState = States.DUMP_FRUIT
+        previousState = States.FIND_BASKET
+        States.printTransition()
+        dumpTimer.reset()
+
+dumpTimer = Timer()
+def DUMP_FRUIT():
+    global currentState, previousState
+
+    if dumpTimer.time() < RobotConstants.DUMP_TIME_MSEC:
+        drive.applySpeeds(math.pi, 0.2, 0, True)
+        gate.setUnlockedPosition()
+    else:
+        drive.stop()
+        gate.setLockedPosition()
+        currentState = States.FIND_LINE
+        previousState = States.DUMP_FRUIT
+        States.printTransition()
+
 
 def robotPeriodic():
-    timer.event(robotPeriodic, RobotConstants.LOOP_PERIOD_MS)
+    timer.event(robotPeriodic, RobotConstants.LOOP_PERIOD_MSEC)
+
     drive.periodic()
     lift.periodic()
     gate.periodic()
     vision.periodic()
     frontLine.periodic()
-    # print(currentState)
-    if (currentState == States.FOLLOW_LINE_ODOMETRY):
+
+    if currentState == States.IDLE:
+        IDLE()
+    elif currentState == States.INIT:
+        INIT()
+    elif currentState == States.FOLLOW_LINE_ODOMETRY:
         FOLLOW_LINE_ODOMETRY(RIGHT, FieldConstants.FIRST_ROW_X_METERS)
-    if (currentState == States.FACE_FORWARD):
-        FACE_FORWARD()
-    if (currentState == States.FIND_FRUIT):
+    elif currentState == States.FACE_DIRECTION:
+        FACE_DIRECTION()
+    elif currentState == States.FIND_FRUIT:
         FIND_FRUIT(RIGHT)
-    if (currentState == States.PICK_FRUIT):
+    elif currentState == States.PICK_FRUIT:
         PICK_FRUIT()
+    elif currentState == States.FOLLOW_LINE_SONAR:
+        FOLLOW_LINE_SONAR(LEFT, FieldConstants.DISTANCE_TO_BASKET_WALL_METERS)
+    elif currentState == States.FIND_BASKET:
+        FIND_BASKET(FRUIT_TYPE.LIME)
+    elif currentState == States.DUMP_FRUIT:
+        DUMP_FRUIT()
+        
+
+    print(States.toString(currentState))
 
     # print("x: " + str(drive.odometry.xMeters), "y: " + str(drive.odometry.yMeters), "theta: " + str(drive.odometry.thetaRad))
     
+def handleButtonPress():
+    global currentState
+    global previousState
+
+    if currentState == States.IDLE:
+        drive.gyroCalibrated = False
+        currentState = States.INIT
+        previousState = States.IDLE
+    elif currentState == States.INIT:
+        if not drive.gyro.is_calibrating():
+            currentState = States.FOLLOW_LINE_ODOMETRY
+            previousState = States.INIT
+    else:
+        previousState = currentState
+        currentState = States.IDLE
+
+button.pressed(handleButtonPress)
 robotPeriodic()
