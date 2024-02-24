@@ -626,7 +626,7 @@ def FACE_DIRECTION():
     error = target - drive.odometry.thetaRad
     effort = error * RobotConstants.DRIVE_ROTATION_KP
     drive.applySpeeds(0, 0, effort, False)
-    if (abs(error) < 0.1 and previousState != States.FIND_FRUIT):
+    if (abs(error) < 0.1):
         drive.stop()
         if previousState == States.FOLLOW_LINE_ODOMETRY:
             currentState = States.FIND_FRUIT
@@ -753,6 +753,12 @@ def robotPeriodic():
         FIND_FRUIT(RIGHT)
     elif currentState == States.PICK_FRUIT:
         PICK_FRUIT()
+    elif currentState == States.FOLLOW_LINE_SONAR:
+        FOLLOW_LINE_SONAR(LEFT, FieldConstants.DISTANCE_TO_BASKET_WALL_METERS)
+    elif currentState == States.FIND_BASKET:
+        FIND_BASKET(FRUIT_TYPE.LIME)
+    elif currentState == States.DUMP_FRUIT:
+        DUMP_FRUIT()
 
     # print("x: " + str(drive.odometry.xMeters), "y: " + str(drive.odometry.yMeters), "theta: " + str(drive.odometry.thetaRad))
     
