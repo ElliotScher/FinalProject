@@ -447,6 +447,12 @@ class Drive:
             else:
                 self.stop()
 
+    def wiggle(self):
+        if (self.gyro.heading() < 0):
+            self.applySpeeds(0, 0, math.pi, True)
+        else:
+            self.applySpeeds(0, 0, -math.pi, True)
+
     def followLineToSonar(self, sonarTargetMeters: float, odomLineYMeters: float, lineSensorArray: LineSensorArray, headingRad = 0.0, findLineIfOff = True):
         driveEffort = (sonarTargetMeters - self.getSonarDistanceMeters()) * RobotConstants.DRIVE_TRANSLATION_KP
         if abs(driveEffort) > RobotConstants.DRIVE_FOLLOW_LINE_SPEED_METERS_PER_SEC:
@@ -603,7 +609,11 @@ def FOLLOW_LINE_ODOMETRY(line: TurnType.TurnType, xOdomTarget: float):
     global currentState, previousState
 
     drive.followLineToOdom(xOdomTarget, FieldConstants.LEFT_LINE_Y_METERS if line == LEFT else FieldConstants.RIGHT_LINE_Y_METERS, frontLine)
-    if (abs(drive.odometry.xMeters - xOdomTarget) < RobotConstants.ODOM_TOLERANCE_METERS):
+    if (abs(drive.odometry.xMeters - xOdomTarget) < RobotConstants.ODOM_TOLERANCE_METERS and line == RIGHT):
+        drive.stop()
+        currentState = States.FACE_DIRECTION
+        previousState = States.FOLLOW_LINE_ODOMETRY
+    if (abs(drive.odometry.xMeters - xOdomTarget) < RobotConstants.ODOM_TOLERANCE_METERS and line == LEFT):
         drive.stop()
         currentState = States.FACE_DIRECTION
         previousState = States.FOLLOW_LINE_ODOMETRY
@@ -616,7 +626,7 @@ def FACE_DIRECTION():
     error = target - drive.odometry.thetaRad
     effort = error * RobotConstants.DRIVE_ROTATION_KP
     drive.applySpeeds(0, 0, effort, False)
-    if (abs(error) < 0.1):
+    if (abs(error) < 0.1 and previousState != States.FIND_FRUIT):
         drive.stop()
         if previousState == States.FOLLOW_LINE_ODOMETRY:
             currentState = States.FIND_FRUIT
@@ -634,7 +644,7 @@ def FIND_FRUIT(fromLine: TurnType.TurnType):
     if(abs(xEffort) > 0.1):
         xEffort = math.copysign(0.1, xEffort)
     
-    if (vision.hasFruit()):
+    if (vision.hasFruit() and previousState):
         Kp = 0.001
         yError = -vision.getXOffset()
         yEffort = yError * Kp
@@ -722,7 +732,6 @@ def DUMP_FRUIT():
         previousState = States.DUMP_FRUIT
         States.printTransition()
 
-
 def robotPeriodic():
     timer.event(robotPeriodic, RobotConstants.LOOP_PERIOD_MSEC)
 
@@ -744,15 +753,6 @@ def robotPeriodic():
         FIND_FRUIT(RIGHT)
     elif currentState == States.PICK_FRUIT:
         PICK_FRUIT()
-    elif currentState == States.FOLLOW_LINE_SONAR:
-        FOLLOW_LINE_SONAR(LEFT, FieldConstants.DISTANCE_TO_BASKET_WALL_METERS)
-    elif currentState == States.FIND_BASKET:
-        FIND_BASKET(FRUIT_TYPE.LIME)
-    elif currentState == States.DUMP_FRUIT:
-        DUMP_FRUIT()
-        
-
-    print(States.toString(currentState))
 
     # print("x: " + str(drive.odometry.xMeters), "y: " + str(drive.odometry.yMeters), "theta: " + str(drive.odometry.thetaRad))
     
