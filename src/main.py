@@ -141,6 +141,7 @@ class RobotConstants:
 
         DUMP_TIME_MSEC = 3000
 
+        MAX_TURN_SPEED_RAD_PER_SEC = 1.5
 
 class FieldConstants:
     LEFT_LINE_Y_METERS = 2.205
@@ -302,6 +303,11 @@ class Drive:
             thetaError -= (2 * math.pi)
         elif thetaError < -math.pi:
             thetaError += (2 * math.pi)
+
+        effort = -thetaError - self.odometry.thetaRad
+
+        if abs(effort) > RobotConstants.MAX_TURN_SPEED_RAD_PER_SEC:
+            effort = math.copysign(RobotConstants.MAX_TURN_SPEED_RAD_PER_SEC, effort)
 
         return -thetaError * RobotConstants.DRIVE_ROTATION_KP
 
@@ -638,8 +644,7 @@ def FACE_DIRECTION(direction: DirectionType.DirectionType):
         target = math.pi
     
     error = target - drive.odometry.thetaRad
-    effort = error * RobotConstants.DRIVE_ROTATION_KP
-    drive.applySpeeds(0, 0, effort, False)
+    drive.applySpeeds(0, 0, drive.calcThetaControlRadPerSec(target), False)
     if (abs(error) < 0.1):
         drive.stop()
         if previousState == States.FOLLOW_LINE_ODOMETRY:
@@ -664,7 +669,7 @@ def FIND_FRUIT(fromLine: TurnType.TurnType):
     if (vision.hasFruit() and previousState):
         Kp = 0.001
         yError = -vision.getXOffset()
-        yEffort = yError * Kp
+        yEffort = yError * Kp if rowCount % 2 == 0 else yError * -Kp
         drive.applySpeedsCartesian(xEffort, yEffort, drive.calcThetaControlRadPerSec(0 if rowCount % 2 == 0 else math.pi), True)
         if (abs(yError) < RobotConstants.FRUIT_CENTERING_TOLERANCE_PX):
             drive.stop()
