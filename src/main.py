@@ -274,13 +274,17 @@ class Drive:
     odometry = Odometry(0.0, 0.0, 0.0)
 
     def __init__(self):        
-        self.gyroCalibrated = False
+        self.gyroStartedCalibrating = False
+        self.gyroHasCalibrated = False
 
     def calibrateGyro(self, heading = 0.0):
-        if not self.gyro.is_calibrating():
+        if not self.gyro.is_calibrating() and not self.gyroStartedCalibrating:
             self.gyro.calibrate()
-        else:
-            self.gyroCalibrated = True
+            print("GYRO CALIBRATING")
+            self.gyroStartedCalibrating = True
+        elif self.gyroStartedCalibrating and not self.gyro.is_calibrating() and not self.gyroHasCalibrated:
+            print("GYRO CALIBRATED")
+            self.gyroHasCalibrated = True
         
         self.gyro.set_heading(heading)
         self.odometry.thetaRad = heading
@@ -546,9 +550,33 @@ class Lift:
     leftLift.set_velocity(RobotConstants.LIFT_SPEED, RPM)
     rightLift.set_velocity(RobotConstants.LIFT_SPEED, RPM)
 
+    def __init__(self):
+        self.hasStartedZeroing = False
+        self.hasZeroed = False
+
     def periodic(self):
-        self.leftLift.spin_to_position(self.target, TURNS, False)
-        self.rightLift.spin_to_position(self.target, TURNS, False)
+        if self.hasStartedZeroing and self.hasZeroed:
+            self.leftLift.spin_to_position(self.target, TURNS, False)
+            self.rightLift.spin_to_position(self.target, TURNS, False)
+
+    def zero(self):
+        if not self.hasStartedZeroing and not self.hasZeroed:
+            self.leftLift.spin(REVERSE, 50)
+            self.rightLift.spin(REVERSE, 50)
+            self.hasStartedZeroing = True
+            print("LIFT ZEROING")
+        elif self.hasStartedZeroing and not self.hasZeroed:
+            if self.leftLift.torque() > 0.25:
+                self.leftLift.stop()
+                self.leftLift.reset_position()
+            
+            if self.rightLift.torque() > 0.25:
+                self.rightLift.stop()
+                self.rightLift.reset_position()
+            
+            if self.leftLift.command() == 0 and self.rightLift.command() == 0:
+                self.hasZeroed = True
+                print("LIFT ZEROED")
 
     def setStowPosition(self):
         self.target = self.STOW_POSITION
@@ -585,7 +613,7 @@ class Gate:
     LOCKED_POSITION = 0.0
     UNLOCKED_POSITION = 90.0
 
-    def __init__(self) -> None:
+    def __init__(self):
         pass
 
     def periodic(self):
@@ -621,14 +649,14 @@ def INIT():
     global rowCount
     vision.changeFruit(FRUIT_TYPE.LIME)
     gate.setLockedPosition()
-    if not drive.gyroCalibrated:
-        drive.calibrateGyro()
+    drive.calibrateGyro()
     drive.odometry.xMeters = RobotConstants.DRIVE_BASE_WIDTH_METERS / 2
-    if drive.gyro.is_calibrating():
-        print("GYRO CALIBRATING")
-    else:
-        print("GYRO CALIBRATED")
     rowCount = 0
+
+    if not lift.hasStartedZeroing and lift.target != Lift.MID_POSITION:
+        lift.setMidPosition()
+    elif lift.atTarget() or lift.hasStartedZeroing:
+        lift.zero()
 
 
 def FOLLOW_LINE_ODOMETRY(line: TurnType.TurnType, xOdomTarget: float):
@@ -804,8 +832,6 @@ def robotPeriodic():
     vision.periodic()
     frontLine.periodic()
 
-    print(States.toString(currentState))
-
     if currentState == States.IDLE:
         IDLE()
     elif currentState == States.INIT:
@@ -840,16 +866,24 @@ def handleButtonPress():
     global previousState
 
     if currentState == States.IDLE:
-        drive.gyroCalibrated = False
+        drive.gyroStartedCalibrating = False
+        drive.gyroHasCalibrated = False
+        lift.hasStartedZeroing = False
+        lift.hasZeroed = False
         currentState = States.INIT
         previousState = States.IDLE
+        States.printTransition()
     elif currentState == States.INIT:
         if not drive.gyro.is_calibrating():
             currentState = States.FOLLOW_LINE_ODOMETRY
             previousState = States.INIT
+            States.printTransition()
     else:
         previousState = currentState
         currentState = States.IDLE
+        States.printTransition()
 
 button.pressed(handleButtonPress)
+
+print("-> IDLE")
 robotPeriodic()
