@@ -58,7 +58,7 @@ class States:
         
 
 class FRUIT_TYPE:
-    LIME = Signature(3, -5513, -3161, -4337, -3823, -2027, -2925, 2.5, 0)
+    LIME = Signature(3, -5513, -3161, -4337, -3823, -2027, -2925, 2.75, 0)
     LEMON = Signature(1, 3231, 3841, 3536, -3355, -2697, -3026, 5.5, 0)
     TANGERINE = Signature(2, 7447, 8539, 7993, -1977, -1525, -1751, 9, 0)
 
@@ -108,7 +108,7 @@ class RobotConstants:
 
         DRIVE_TRANSLATION_KP = 2.0
 
-        DRIVE_ROTATION_KP = 7.5
+        DRIVE_ROTATION_KP = 10
 
         DRIVE_MAX_SPEED_METERS_PER_SEC = 0.2
 
@@ -119,17 +119,20 @@ class RobotConstants:
         ODOM_TOLERANCE_METERS = 0.01
 
         ODOM_X_POSITIVE_DRIFT = 194 / 200
-        ODOM_X_NEGATIVE_DRIFT = 220 / 200
+        ODOM_X_NEGATIVE_DRIFT = 230 / 200
         ODOM_Y_POSITIVE_DRIFT = 180 / 200
         ODOM_Y_NEGATIVE_DRIFT = 211 / 200
 
         ODOM_Y_DRIFT_PER_POSITIVE_X_TRANSLATION = -10 / 200
         ODOM_Y_DRIFT_PER_NEGATIVE_X_TRANSLATION = -17 / 200
 
+        ODOM_X_DRIFT_PER_POSITIVE_Y_TRANSLATION = 2 / 200
+        ODOM_X_DRIFT_PER_NEGATIVE_Y_TRANSLATION = 10 / 200
+
         LINE_REFLECTIVITY_THRESHOLD = 15
 
-        FOLLOW_LINE_KP = 0.001
-        FOLLOW_LINE_KD = 0.00003
+        FOLLOW_LINE_KP = 0.0002
+        FOLLOW_LINE_KD = 0.000006
 
         LIFT_SPEED = 150
 
@@ -137,7 +140,7 @@ class RobotConstants:
 
         FRUIT_CENTERING_TOLERANCE_PX = 10
 
-        FRUIT_APPROACH_DISTANCE_METERS = 0.15
+        FRUIT_APPROACH_DISTANCE_METERS = 0.2
 
         DUMP_TIME_MSEC = 3000
 
@@ -148,7 +151,7 @@ class FieldConstants:
     RIGHT_LINE_Y_METERS = 0.28
 
     FIRST_ROW_X_METERS = 0.65
-    SECOND_ROW_X_METERS = 1.4
+    SECOND_ROW_X_METERS = 1.6
 
     DISTANCE_TO_BASKET_WALL_METERS = 0.45
 
@@ -173,7 +176,7 @@ class Odometry:
 
         # As the wheels approach parallel/orthoginal to the drive direction, we don't need to compensate for carpet drift
         robotRelativeTranslationRad = fieldOrientedTranslationRad + headingRad
-        driftCompPercentage = 1 # abs(math.cos((2 * robotRelativeTranslationRad) % math.pi))
+        driftCompPercentage = abs(math.cos((2 * robotRelativeTranslationRad) % math.pi))
 
         xDelta = translationDeltaMeters * math.cos(fieldOrientedTranslationRad)
         yDelta = translationDeltaMeters * math.sin(fieldOrientedTranslationRad)
@@ -188,7 +191,13 @@ class Odometry:
             yDelta += ((xDelta * RobotConstants.ODOM_Y_DRIFT_PER_POSITIVE_X_TRANSLATION) * driftCompPercentage)
         else:
             xDelta *= (RobotConstants.ODOM_X_NEGATIVE_DRIFT ** driftCompPercentage)
-            yDelta += ((xDelta * RobotConstants.ODOM_Y_DRIFT_PER_NEGATIVE_X_TRANSLATION) * driftCompPercentage)
+            yDelta += ((xDelta * RobotConstants.ODOM_Y_DRIFT_PER_POSITIVE_X_TRANSLATION) * driftCompPercentage)
+
+        if yDelta > 0.0:
+            xDelta += ((yDelta * RobotConstants.ODOM_X_DRIFT_PER_POSITIVE_Y_TRANSLATION * driftCompPercentage))
+        else:
+            xDelta += ((yDelta * RobotConstants.ODOM_X_DRIFT_PER_NEGATIVE_Y_TRANSLATION * driftCompPercentage))
+
 
         self.xMeters += xDelta
         self.yMeters += yDelta
@@ -536,6 +545,7 @@ class Lift:
     PINION_CIRCUMFERENCE_IN = 0.5
 
     STOW_POSITION = 0.025
+    DEPLOY_FLAP_POSITION = 0.5
     LOW_POSITION = 0.2
     MID_POSITION = 3.0
     HIGH_POSITION = 5.5
@@ -550,7 +560,10 @@ class Lift:
         self.hasZeroed = False
 
     def periodic(self):
-        if self.hasStartedZeroing and self.hasZeroed:
+        if currentState == States.IDLE:
+            self.leftLift.stop()
+            self.rightLift.stop()
+        elif (self.hasStartedZeroing and self.hasZeroed) or (not self.hasStartedZeroing and not self.hasZeroed):
             self.leftLift.spin_to_position(self.target, TURNS, False)
             self.rightLift.spin_to_position(self.target, TURNS, False)
 
@@ -559,6 +572,7 @@ class Lift:
             self.leftLift.spin(REVERSE, 50)
             self.rightLift.spin(REVERSE, 50)
             self.hasStartedZeroing = True
+            self.target = Lift.STOW_POSITION
             print("LIFT ZEROING")
         elif self.hasStartedZeroing and not self.hasZeroed:
             if self.leftLift.torque() > 0.25:
@@ -575,6 +589,9 @@ class Lift:
 
     def setStowPosition(self):
         self.target = self.STOW_POSITION
+
+    def setFlapDeployPosition(self):
+        self.target = self.DEPLOY_FLAP_POSITION
 
     def setLowPosition(self):
         self.target = self.LOW_POSITION
@@ -645,10 +662,14 @@ def INIT():
     gate.setLockedPosition()
     drive.calibrateGyro()
     drive.odometry.xMeters = RobotConstants.DRIVE_BASE_WIDTH_METERS / 2
-    rowCount = 0
+    rowCount = 1
 
-    if not lift.hasStartedZeroing and lift.target != Lift.MID_POSITION:
-        lift.setMidPosition()
+    if not lift.hasStartedZeroing and lift.target != Lift.DEPLOY_FLAP_POSITION:
+        lift.setFlapDeployPosition()
+        print("DEPLOYING FLAP")
+    elif lift.atTarget() and not lift.hasStartedZeroing:
+        print("FLAP DEPLOYED")
+        lift.zero()
     elif lift.atTarget() or lift.hasStartedZeroing:
         lift.zero()
 
