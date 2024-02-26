@@ -108,7 +108,7 @@ class RobotConstants:
 
         DRIVE_TRANSLATION_KP = 2.0
 
-        DRIVE_ROTATION_KP = 8.5
+        DRIVE_ROTATION_KP = 7.5
 
         DRIVE_MAX_SPEED_METERS_PER_SEC = 0.2
 
@@ -119,15 +119,12 @@ class RobotConstants:
         ODOM_TOLERANCE_METERS = 0.01
 
         ODOM_X_POSITIVE_DRIFT = 194 / 200
-        ODOM_X_NEGATIVE_DRIFT = 230 / 200
+        ODOM_X_NEGATIVE_DRIFT = 220 / 200
         ODOM_Y_POSITIVE_DRIFT = 180 / 200
         ODOM_Y_NEGATIVE_DRIFT = 211 / 200
 
         ODOM_Y_DRIFT_PER_POSITIVE_X_TRANSLATION = -10 / 200
         ODOM_Y_DRIFT_PER_NEGATIVE_X_TRANSLATION = -17 / 200
-
-        ODOM_X_DRIFT_PER_POSITIVE_Y_TRANSLATION = -1 / 200
-        ODOM_X_DRIFT_PER_NEGATIVE_Y_TRANSLATION = -16 / 200
 
         LINE_REFLECTIVITY_THRESHOLD = 15
 
@@ -140,7 +137,7 @@ class RobotConstants:
 
         FRUIT_CENTERING_TOLERANCE_PX = 10
 
-        FRUIT_APPROACH_DISTANCE_METERS = 0.2
+        FRUIT_APPROACH_DISTANCE_METERS = 0.15
 
         DUMP_TIME_MSEC = 3000
 
@@ -176,7 +173,7 @@ class Odometry:
 
         # As the wheels approach parallel/orthoginal to the drive direction, we don't need to compensate for carpet drift
         robotRelativeTranslationRad = fieldOrientedTranslationRad + headingRad
-        driftCompPercentage = abs(math.cos((2 * robotRelativeTranslationRad) % math.pi))
+        driftCompPercentage = 1 # abs(math.cos((2 * robotRelativeTranslationRad) % math.pi))
 
         xDelta = translationDeltaMeters * math.cos(fieldOrientedTranslationRad)
         yDelta = translationDeltaMeters * math.sin(fieldOrientedTranslationRad)
@@ -192,11 +189,6 @@ class Odometry:
         else:
             xDelta *= (RobotConstants.ODOM_X_NEGATIVE_DRIFT ** driftCompPercentage)
             yDelta += ((xDelta * RobotConstants.ODOM_Y_DRIFT_PER_NEGATIVE_X_TRANSLATION) * driftCompPercentage)
-
-        if(yDelta > 0.0):
-            xDelta += ((yDelta * RobotConstants.ODOM_X_DRIFT_PER_POSITIVE_Y_TRANSLATION) * driftCompPercentage)
-        else:
-            xDelta += ((-yDelta * RobotConstants.ODOM_X_DRIFT_PER_NEGATIVE_Y_TRANSLATION) * driftCompPercentage)
 
         self.xMeters += xDelta
         self.yMeters += yDelta
@@ -515,10 +507,13 @@ class Vision:
         return self.currentSnapshot
 
     def getXOffset(self):
-        return (158 - self.vision.largest_object().centerX)
+        return (160 - self.vision.largest_object().centerX)
 
     def getYOffset(self):
         return (106 - self.vision.largest_object().centerY)
+    
+    def getYOffsetMeters(self):
+        return self.getYOffset() * 0.0002645833
 
 
 
@@ -610,8 +605,7 @@ button = Bumper(DevicePorts.BUTTON)
 currentState = States.IDLE
 previousState = States.IDLE
 rowCount = 0
-
-pickFruitXTargetMeters = 0
+currentFruitYOffset = 0
 
 def IDLE():
     drive.stop()
@@ -666,42 +660,29 @@ def FACE_DIRECTION(direction: DirectionType.DirectionType):
         States.printTransition()
 
 def FIND_FRUIT(fromLine: TurnType.TurnType):
-    global currentState, previousState, rowCount, pickFruitXTargetMeters
+    global currentState, previousState, rowCount, currentFruitYOffset
+
+    if rowCount == 0:
+        xError = FieldConstants.FIRST_ROW_X_METERS - drive.odometry.xMeters
+    if rowCount == 1:
+        xError = FieldConstants.SECOND_ROW_X_METERS - drive.odometry.xMeters
+    xEffort = xError * RobotConstants.DRIVE_TRANSLATION_KP
+    if(abs(xEffort) > 0.1):
+        xEffort = math.copysign(0.1, xEffort)
     
-    if vision.hasFruit():
-        
+    if (vision.hasFruit() and previousState):
         Kp = 0.001
-
-        xError = vision.getYOffset()
-        xEffort = xError * Kp if rowCount % 2 == 0 else -xError * Kp
-
-        if(abs(xEffort) > RobotConstants.DRIVE_MAX_SPEED_METERS_PER_SEC):
-            xEffort = math.copysign(RobotConstants.DRIVE_MAX_SPEED_METERS_PER_SEC, xEffort)
-        
-        yError = vision.getXOffset()
-        yEffort = -yError * Kp if rowCount % 2 == 0 else yError * Kp
-
-        if(abs(yEffort) > RobotConstants.DRIVE_MAX_SPEED_METERS_PER_SEC):
-            yEffort = math.copysign(RobotConstants.DRIVE_MAX_SPEED_METERS_PER_SEC, yEffort)
-
+        yError = -vision.getXOffset()
+        yEffort = yError * Kp if rowCount % 2 == 0 else yError * -Kp
         drive.applySpeedsCartesian(xEffort, yEffort, drive.calcThetaControlRadPerSec(0 if rowCount % 2 == 0 else math.pi), True)
-        if (abs(yError) < RobotConstants.FRUIT_CENTERING_TOLERANCE_PX and abs(xError) < RobotConstants.FRUIT_CENTERING_TOLERANCE_PX):
+        if (abs(yError) < RobotConstants.FRUIT_CENTERING_TOLERANCE_PX):
             drive.stop()
-            pickFruitXTargetMeters = drive.odometry.xMeters + (RobotConstants.FRUIT_APPROACH_DISTANCE_METERS if rowCount % 2 == 0 else -RobotConstants.FRUIT_APPROACH_DISTANCE_METERS)
-            
+            currentFruitYOffset = vision.getYOffsetMeters()
             currentState = States.PICK_FRUIT
             previousState = States.FIND_FRUIT
             States.printTransition()
             lift.setMidPosition()
     else:
-        if rowCount == 0:
-            xError = FieldConstants.FIRST_ROW_X_METERS - drive.odometry.xMeters
-        if rowCount == 1:
-            xError = FieldConstants.SECOND_ROW_X_METERS - drive.odometry.xMeters
-
-        xEffort = xError * RobotConstants.DRIVE_TRANSLATION_KP
-        if(abs(xEffort) > RobotConstants.DRIVE_MAX_SPEED_METERS_PER_SEC):
-            xEffort = math.copysign(RobotConstants.DRIVE_MAX_SPEED_METERS_PER_SEC, xEffort)
         drive.applySpeedsCartesian(xEffort, (0.1 if fromLine == RIGHT else -0.1), drive.calcThetaControlRadPerSec(0 if rowCount % 2 == 0 else math.pi), True)
         if (frontLine.hasLine() and previousState != States.FACE_DIRECTION):
             drive.stop()
@@ -711,16 +692,15 @@ def FIND_FRUIT(fromLine: TurnType.TurnType):
 
 
 def PICK_FRUIT():
-    global currentState, previousState, rowCount
+    global currentState, previousState, rowCount, currentFruitYOffset
 
-    desiredX = drive.odometry.xMeters
     desiredY = drive.odometry.yMeters
     desiredTheta = 0 if rowCount % 2 == 0 else math.pi
     if lift.atTarget() and lift.target == lift.MID_POSITION:
         if rowCount == 0:
-            desiredX = FieldConstants.FIRST_ROW_X_METERS + RobotConstants.FRUIT_APPROACH_DISTANCE_METERS
+            desiredX = FieldConstants.FIRST_ROW_X_METERS + RobotConstants.FRUIT_APPROACH_DISTANCE_METERS + currentFruitYOffset
         elif rowCount == 1:
-            desiredX = FieldConstants.SECOND_ROW_X_METERS - RobotConstants.FRUIT_APPROACH_DISTANCE_METERS
+            desiredX = FieldConstants.SECOND_ROW_X_METERS - RobotConstants.FRUIT_APPROACH_DISTANCE_METERS - currentFruitYOffset
         if (abs(desiredX - drive.odometry.xMeters) > 0.01):
             drive.driveToPosition(desiredX, desiredY, desiredTheta)
         else:
@@ -750,7 +730,7 @@ def FOLLOW_LINE_SONAR(line: TurnType.TurnType, sonarTargetMeters: float):
         currentState = States.FIND_BASKET
         previousState = States.FOLLOW_LINE_SONAR
         States.printTransition()
- 
+
 def FIND_BASKET(fruit: Signature):
     global currentState, previousState
 
@@ -832,7 +812,7 @@ def robotPeriodic():
         DUMP_FRUIT()
     elif currentState == States.FIND_LINE:
         FIND_LINE()
-                
+        
     # print("x: " + str(drive.odometry.xMeters), "y: " + str(drive.odometry.yMeters), "theta: " + str(drive.odometry.thetaRad))
     
 def handleButtonPress():
