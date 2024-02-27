@@ -758,9 +758,10 @@ def PICK_FRUIT():
 
     desiredY = drive.odometry.yMeters
     desiredTheta = 0 if rowCount % 2 == 0 else math.pi
+    desiredX = currentFruitYOffset + RobotConstants.FRUIT_APPROACH_DISTANCE_METERS
     if lift.atTarget() and lift.target == lift.MID_POSITION:
-        if (abs(pickFruitXTarget - drive.odometry.xMeters) > 0.01):
-            drive.driveToPosition(pickFruitXTarget, desiredY, desiredTheta, RobotConstants.DRIVE_APPROACH_FRUIT_SPEED_METERS_PER_SEC)
+        if (abs(desiredX - drive.odometry.xMeters) > RobotConstants.ODOM_TOLERANCE_METERS):
+            drive.driveToPosition(desiredX, desiredY, desiredTheta, RobotConstants.DRIVE_APPROACH_FRUIT_SPEED_METERS_PER_SEC)
         else:
             drive.stop()
             lift.setStowPosition()
