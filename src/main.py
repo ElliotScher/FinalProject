@@ -47,6 +47,8 @@ class States:
             return "FOLLOW_LINE_SONAR"
         elif state == States.FIND_BASKET:
             return "FIND_BASKET"
+        elif state == States.DUMP_FRUIT:
+            return "DUMP_FRUIT"
         elif state == States.FIND_LINE:
             return "FIND_LINE"
         else:
@@ -143,7 +145,7 @@ class RobotConstants:
 
         FRUIT_CENTERING_TOLERANCE_PX = 10
 
-        FRUIT_APPROACH_DISTANCE_METERS = 0.2
+        FRUIT_APPROACH_DISTANCE_METERS = 0.15
 
         DUMP_TIME_MSEC = 6000
 
@@ -153,7 +155,7 @@ class FieldConstants:
     LEFT_LINE_Y_METERS = 2.205
     RIGHT_LINE_Y_METERS = 0.28
 
-    FIRST_ROW_X_METERS = 0.7
+    FIRST_ROW_X_METERS = 0.75
     SECOND_ROW_X_METERS = 1.65
 
     DISTANCE_TO_BASKET_WALL_METERS = 0.45
@@ -197,9 +199,9 @@ class Odometry:
             yDelta += ((xDelta * RobotConstants.ODOM_Y_DRIFT_PER_POSITIVE_X_TRANSLATION) * driftCompPercentage)
 
         if yDelta > 0.0:
-            xDelta += ((yDelta * RobotConstants.ODOM_X_DRIFT_PER_POSITIVE_Y_TRANSLATION * driftCompPercentage))
+            xDelta += ((yDelta * RobotConstants.ODOM_X_DRIFT_PER_POSITIVE_Y_TRANSLATION * math.cos(headingRad)))
         else:
-            xDelta += ((yDelta * RobotConstants.ODOM_X_DRIFT_PER_NEGATIVE_Y_TRANSLATION * driftCompPercentage))
+            xDelta += ((yDelta * RobotConstants.ODOM_X_DRIFT_PER_NEGATIVE_Y_TRANSLATION * math.cos(headingRad)))
 
 
         self.xMeters += xDelta
@@ -786,6 +788,7 @@ def PICK_FRUIT():
 
 def FOLLOW_LINE_SONAR(line: TurnType.TurnType, sonarTargetMeters: float):
     global currentState, previousState
+
     drive.followLineToSonar(sonarTargetMeters, FieldConstants.LEFT_LINE_Y_METERS if line == LEFT else FieldConstants.RIGHT_LINE_Y_METERS, frontLine)
     if (abs(drive.getSonarDistanceMeters() - sonarTargetMeters) < RobotConstants.ODOM_TOLERANCE_METERS):
         drive.stop()
@@ -831,8 +834,11 @@ def DUMP_FRUIT():
 
 def FIND_LINE():
     global currentState, previousState, rowCount
-    drive.applySpeeds(3 * math.pi / 2, 0.1, 0, True)
+    xError = (FieldConstants.DISTANCE_TO_BASKET_WALL_METERS + (RobotConstants.DRIVE_BASE_WIDTH_METERS / 2)) - drive.odometry.xMeters
+    xEffort = xError * RobotConstants.DRIVE_TRANSLATION_KP
+    drive.applySpeedsCartesian(xEffort, -RobotConstants.DRIVE_FIND_LINE_SPEED_METERS_PER_SEC, 0, True)
     if (frontLine.hasLine()):
+        drive.stop()
         drive.odometry.xMeters = drive.getSonarDistanceMeters()
         currentState = States.FOLLOW_LINE_ODOMETRY
         previousState = States.FIND_LINE
@@ -862,10 +868,7 @@ def robotPeriodic():
         else:
             FACE_DIRECTION(REVERSE)
     elif currentState == States.FIND_FRUIT:
-        if rowCount == 0:
-            FIND_FRUIT(RIGHT)
-        elif rowCount == 1:
-            FIND_FRUIT(RIGHT)
+        FIND_FRUIT(RIGHT)
     elif currentState == States.PICK_FRUIT:
         PICK_FRUIT()
     elif currentState == States.FOLLOW_LINE_SONAR:
