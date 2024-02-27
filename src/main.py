@@ -725,14 +725,8 @@ def FIND_FRUIT(fromLine: TurnType.TurnType):
         if abs(yEffort) > RobotConstants.DRIVE_APPROACH_FRUIT_SPEED_METERS_PER_SEC:
             yEffort = math.copysign(RobotConstants.DRIVE_APPROACH_FRUIT_SPEED_METERS_PER_SEC, yEffort)
 
-        xError = vision.getYOffset()
-        xEffort = xError * Kp if rowCount % 2 == 0 else -xError * Kp
-
-        if abs(xEffort) > RobotConstants.DRIVE_APPROACH_FRUIT_SPEED_METERS_PER_SEC:
-            xEffort = math.copysign(RobotConstants.DRIVE_APPROACH_FRUIT_SPEED_METERS_PER_SEC, xEffort)
-
-        drive.applySpeedsCartesian(xEffort, yEffort, drive.calcThetaControlRadPerSec(0 if rowCount % 2 == 0 else math.pi), True)
-        if (abs(yError) < RobotConstants.FRUIT_CENTERING_TOLERANCE_PX and abs(xError) < RobotConstants.FRUIT_CENTERING_TOLERANCE_PX):
+        drive.applySpeedsCartesian(0, yEffort, drive.calcThetaControlRadPerSec(0 if rowCount % 2 == 0 else math.pi), True)
+        if (abs(yError) < RobotConstants.FRUIT_CENTERING_TOLERANCE_PX):
             drive.stop()
             currentFruitYOffset = vision.getYOffsetMeters()
             currentState = States.PICK_FRUIT
