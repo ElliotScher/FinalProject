@@ -192,8 +192,6 @@ class FieldConstants:
 
     BASKET_DEPTH_METERS = 0.23
 
-
-
 class Odometry:
 
     def __init__(self, x = 0.0, y = 0.0, theta = 0.0):
@@ -730,6 +728,10 @@ def INIT():
 def FOLLOW_LINE_ODOMETRY(line: TurnType.TurnType, xOdomTarget: float):
     global currentState, previousState
 
+    if rowCount == 2 or rowCount == 3:
+        vision.changeFruit(FRUIT_TYPE.TANGERINE)
+    if rowCount == 4 or rowCount == 5:
+        vision.changeFruit(FRUIT_TYPE.LEMON)
     drive.followLineToOdom(xOdomTarget, FieldConstants.LEFT_LINE_Y_METERS if line == LEFT else FieldConstants.RIGHT_LINE_Y_METERS, frontLine)
     if (abs(drive.odometry.xMeters - xOdomTarget) < RobotConstants.ODOM_TOLERANCE_METERS and line == RIGHT):
         drive.stop()
@@ -863,6 +865,21 @@ def PICK_FRUIT():
             drive.driveToPosition(desiredX, desiredY, desiredTheta, RobotConstants.DRIVE_APPROACH_FRUIT_SPEED_METERS_PER_SEC)
         else:
             drive.stop()
+            currentState = States.FIND_FRUIT
+            previousState = States.APPROACH_FRUIT
+            States.printTransition()
+
+
+def PICK_FRUIT():
+    global currentState, previousState, targetRow, pickFruitXTarget
+
+    desiredY = drive.odometry.yMeters
+    desiredTheta = 0 if targetRow % 2 == 0 else math.pi
+    desiredX = pickFruitXTarget
+    if lift.atTarget() and lift.targetPosition != lift.STOW_POSITION:
+        if (abs(desiredX - drive.odometry.xMeters) > RobotConstants.ODOM_TOLERANCE_METERS):
+            drive.driveToPosition(desiredX, desiredY, desiredTheta, RobotConstants.DRIVE_APPROACH_FRUIT_SPEED_METERS_PER_SEC)
+        else:
             lift.setStowPosition()
     elif lift.atTarget() and lift.targetPosition == lift.STOW_POSITION:
         desiredX = drive.odometry.xMeters
