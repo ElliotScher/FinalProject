@@ -151,7 +151,7 @@ class RobotConstants:
         ODOM_X_DRIFT_PER_POSITIVE_Y_TRANSLATION = 2 / 200
         ODOM_X_DRIFT_PER_NEGATIVE_Y_TRANSLATION = 10 / 200
 
-        LINE_REFLECTIVITY_THRESHOLD = 15
+        LINE_REFLECTIVITY_THRESHOLD = 17
 
         FOLLOW_LINE_KP = 0.0002
         FOLLOW_LINE_KD = 0.000006
@@ -184,7 +184,7 @@ class FieldConstants:
     FIFTH_ROW_X_METERS = 2.03
     SIXTH_ROW_X_METERS = 2.96
 
-    DISTANCE_TO_BASKET_WALL_METERS = 0.3
+    DISTANCE_TO_BASKET_WALL_METERS = 0.45
 
     LIME_BASKET_Y_METERS = 0.71
     TANGERINE_BASKET_Y_METERS = 1.4
@@ -700,7 +700,7 @@ button = Bumper(DevicePorts.BUTTON)
 
 currentState = States.IDLE
 previousState = States.IDLE
-targetRow = 2
+targetRow = 0
 pickFruitXTarget = 0
 
 def IDLE():
@@ -712,8 +712,8 @@ def INIT():
     gate.setLockedPosition()
     drive.calibrateGyro()
     drive.odometry.xMeters = RobotConstants.DRIVE_BASE_WIDTH_METERS / 2
-    targetRow = 0
-    vision.changeFruit(FruitTypes.LIME)
+    targetRow = 4
+    vision.changeFruit(FruitTypes.LEMON)
 
     if not lift.hasStartedZeroing and lift.targetPosition != Lift.DEPLOY_FLAP_POSITION:
         lift.setFlapDeployPosition()
@@ -733,6 +733,7 @@ def FOLLOW_LINE_ODOMETRY(line: TurnType.TurnType, xOdomTarget: float):
         drive.stop()
         currentState = States.FACE_DIRECTION
         previousState = States.FOLLOW_LINE_ODOMETRY
+        States.printTransition()
     if (abs(drive.odometry.xMeters - xOdomTarget) < RobotConstants.ODOM_TOLERANCE_METERS and line == LEFT):
         drive.stop()
         currentState = States.FACE_DIRECTION
@@ -920,10 +921,10 @@ def FIND_BASKET(fruit: Signature):
 
 def setDumpFruitXOdom():
     drive.odometry.xMeters = FieldConstants.BASKET_DEPTH_METERS + (RobotConstants.DRIVE_BASE_WIDTH_METERS / 2)
-    drive.gyro.set_heading(0)
-    drive.odometry.thetaRad = 0
+    # drive.gyro.set_heading(0)
+    # drive.odometry.thetaRad = 0
     print("x odometry updated:", drive.odometry.xMeters)
-    print("theta odometry updated", drive.odometry.thetaRad)
+    # print("theta odometry updated", drive.odometry.thetaRad)
 
 dumpTimer = Timer()
 def DUMP_FRUIT():
